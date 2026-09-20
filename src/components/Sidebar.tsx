@@ -20,13 +20,11 @@ import { ScreenType } from '../types';
 interface SidebarProps {
   currentScreen: ScreenType;
   onNavigate: (screen: ScreenType) => void;
-  onOpenFlutterExport?: () => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
   currentScreen,
-  onNavigate,
-  onOpenFlutterExport
+  onNavigate
 }) => {
   const menuItems = [
     {
@@ -149,30 +147,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
         })}
       </div>
 
-      {/* Flutter App Direct Hub Tile */}
+      {/* Bottom info tile */}
       <div className="p-3 border-t border-gray-100 dark:border-gray-800 space-y-2">
-        {onOpenFlutterExport && (
-          <button
-            onClick={onOpenFlutterExport}
-            className="w-full flex items-center justify-between p-2.5 rounded-xl bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-emerald-950/40 dark:to-teal-950/30 border border-emerald-200 dark:border-emerald-800/60 text-right cursor-pointer hover:shadow-xs transition-all"
-          >
-            <div className="flex items-center gap-2">
-              <Zap className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
-              <div>
-                <div className="text-xs font-black text-emerald-900 dark:text-emerald-200">تثبيت البرامج (APK & EXE)</div>
-                <div className="text-[10px] text-emerald-700 dark:text-emerald-400">تثبيت مباشر بدون متصفح</div>
-              </div>
-            </div>
-            <span className="text-[10px] bg-emerald-600 text-white font-bold px-1.5 py-0.5 rounded">تحميل</span>
-          </button>
-        )}
-
         <div className="flex items-center justify-between text-[10px] text-gray-400 dark:text-gray-500 px-1">
           <span className="flex items-center gap-1">
             <HardDrive className="w-3 h-3 text-emerald-500" />
-            <span>قاعدة بيانات محلية</span>
+            <span>نظام سحابي & محلي</span>
           </span>
-          <span>v1.0 أوفلاين</span>
+          <span>v1.0 نشط</span>
         </div>
       </div>
     </aside>

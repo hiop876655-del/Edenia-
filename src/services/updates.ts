@@ -21,22 +21,43 @@ export interface UpdateCheckResult {
 }
 
 export const updateService = {
-  getCurrentVersion() {
+  getCurrentVersion(): string {
+    if (typeof window !== 'undefined') {
+      try {
+        const savedVersion = localStorage.getItem('idenia_applied_version');
+        if (savedVersion) return savedVersion;
+      } catch {
+        // Fallback
+      }
+    }
     return APP_VERSION;
   },
 
-  getCurrentBuild() {
+  getCurrentBuild(): number {
+    if (typeof window !== 'undefined') {
+      try {
+        const savedBuild = localStorage.getItem('idenia_applied_build');
+        if (savedBuild && !isNaN(Number(savedBuild))) {
+          return Math.max(APP_BUILD_NUMBER, Number(savedBuild));
+        }
+      } catch {
+        // Fallback
+      }
+    }
     return APP_BUILD_NUMBER;
   },
 
   // 1. Check for available updates in Cloud Firestore
   async checkForUpdates(): Promise<UpdateCheckResult> {
     const isOnline = await checkRealInternetConnection(2500);
+    const currentBuild = this.getCurrentBuild();
+    const currentVer = this.getCurrentVersion();
+
     if (!isOnline) {
       return {
         hasUpdate: false,
-        currentVersion: APP_VERSION,
-        currentBuild: APP_BUILD_NUMBER,
+        currentVersion: currentVer,
+        currentBuild: currentBuild,
         latestRelease: null,
         isForced: false,
         isOnline: false,
@@ -49,26 +70,26 @@ export const updateService = {
       if (!latest) {
         return {
           hasUpdate: false,
-          currentVersion: APP_VERSION,
-          currentBuild: APP_BUILD_NUMBER,
+          currentVersion: currentVer,
+          currentBuild: currentBuild,
           latestRelease: null,
           isForced: false,
           isOnline: true
         };
       }
 
-      // Check if latest build number is strictly greater than local build number,
-      // or if version string is different
+      // Check if latest build number is strictly greater than current installed build number,
+      // or if clean version string is different and latest build is greater
       const latestBuild = Number(latest.buildNumber) || 0;
       const cleanLatestVer = (latest.version || '').replace(/^v/, '').trim();
-      const cleanCurrentVer = APP_VERSION.replace(/^v/, '').trim();
+      const cleanCurrentVer = currentVer.replace(/^v/, '').trim();
 
-      const hasUpdate = (latestBuild > APP_BUILD_NUMBER) || (cleanLatestVer !== '' && cleanLatestVer !== cleanCurrentVer && latestBuild >= APP_BUILD_NUMBER);
+      const hasUpdate = (latestBuild > currentBuild) || (cleanLatestVer !== '' && cleanLatestVer !== cleanCurrentVer && latestBuild > currentBuild);
 
       return {
         hasUpdate,
-        currentVersion: APP_VERSION,
-        currentBuild: APP_BUILD_NUMBER,
+        currentVersion: currentVer,
+        currentBuild: currentBuild,
         latestRelease: latest,
         isForced: !!latest.isForceUpdate,
         isOnline: true
@@ -76,8 +97,8 @@ export const updateService = {
     } catch (err: any) {
       return {
         hasUpdate: false,
-        currentVersion: APP_VERSION,
-        currentBuild: APP_BUILD_NUMBER,
+        currentVersion: currentVer,
+        currentBuild: currentBuild,
         latestRelease: null,
         isForced: false,
         isOnline: true,
@@ -87,12 +108,29 @@ export const updateService = {
   },
 
   // 2. Apply Live Update (Purge Caches, Unregister SW, Reload Seamlessly)
-  async applyLiveUpdate(onProgress?: (step: string, percent: number) => void): Promise<void> {
+  async applyLiveUpdate(
+    latestRelease?: SystemReleaseRecord | null,
+    onProgress?: (step: string, percent: number) => void
+  ): Promise<void> {
     try {
-      onProgress?.('جاري فحص اتصال الخادم السحابي...', 20);
+      onProgress?.('جاري فحص اتصال الخادم السحابي واستلام الحزمة الجديدة...', 20);
       await new Promise(r => setTimeout(r, 400));
 
       onProgress?.('جاري تفريغ الذاكرة المؤقتة القديمة وسحب أحدث حزم الكود...', 50);
+
+      // Save updated version and build number in localStorage
+      if (latestRelease && typeof window !== 'undefined') {
+        try {
+          if (latestRelease.buildNumber) {
+            localStorage.setItem('idenia_applied_build', String(latestRelease.buildNumber));
+          }
+          if (latestRelease.version) {
+            localStorage.setItem('idenia_applied_version', latestRelease.version);
+          }
+        } catch {
+          // Non-blocking
+        }
+      }
 
       // Purge CacheStorage
       if (typeof window !== 'undefined' && 'caches' in window) {
@@ -139,7 +177,20 @@ export const updateService = {
 
   // 3. Admin: Publish Release
   async publishRelease(release: Omit<SystemReleaseRecord, 'publishedAt' | 'status'>) {
-    return await publishAppReleaseInFirebase(release);
+    const published = await publishAppReleaseInFirebase(release);
+    if (typeof window !== 'undefined' && release) {
+      try {
+        if (release.buildNumber) {
+          localStorage.setItem('idenia_applied_build', String(release.buildNumber));
+        }
+        if (release.version) {
+          localStorage.setItem('idenia_applied_version', release.version);
+        }
+      } catch {
+        // Non-blocking
+      }
+    }
+    return published;
   },
 
   // 4. Admin: Get History

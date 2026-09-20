@@ -30,7 +30,6 @@ interface HeaderProps {
   onToggleDarkMode?: () => void;
   onNavigate?: (screen: ScreenType) => void;
   onLogout: () => void;
-  onOpenFlutterExport?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -42,8 +41,7 @@ export const Header: React.FC<HeaderProps> = ({
   onToggleTheme,
   onToggleDarkMode,
   onNavigate,
-  onLogout,
-  onOpenFlutterExport
+  onLogout
 }) => {
   const isDark = isDarkMode ?? darkMode ?? false;
   const toggle = onToggleTheme || onToggleDarkMode || (() => {});
@@ -150,7 +148,7 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
         )}
 
-        {/* Right Controls: Flutter Apps Export + Actions */}
+        {/* Right Controls: Actions & Shortcuts */}
         <div className="flex items-center gap-1.5 md:gap-2">
           {/* Live Update Available Badge */}
           {hasNewUpdate && onNavigate && (
@@ -162,19 +160,6 @@ export const Header: React.FC<HeaderProps> = ({
               <Sparkles className="w-3.5 h-3.5 text-amber-300" />
               <span className="hidden sm:inline">تحديث متوفر ⚡</span>
               <span className="sm:hidden">تحديث ⚡</span>
-            </button>
-          )}
-
-          {/* Direct Button to Open Native Apps Hub */}
-          {onOpenFlutterExport && (
-            <button
-              onClick={onOpenFlutterExport}
-              title="تحميل برامج التثبيت الأصلية (APK للأندرويد و Setup للويندوز)"
-              className="flex items-center gap-1.5 bg-gradient-to-r from-[#1B5E20] to-[#2E7D32] hover:from-[#17521c] hover:to-[#256629] text-white font-bold text-xs py-1.5 px-3 rounded-xl shadow-xs transition-all cursor-pointer active:scale-95"
-            >
-              <Zap className="w-3.5 h-3.5 text-amber-300" />
-              <span className="hidden sm:inline">تحميل البرامج (APK & Setup)</span>
-              <span className="sm:hidden">تحميل البرامج</span>
             </button>
           )}
 

@@ -10,7 +10,6 @@ import { Sidebar } from './components/Sidebar';
 import { BottomNav } from './components/BottomNav';
 import { ThermalReceiptModal } from './components/ThermalReceiptModal';
 import { MobileMoreDrawer } from './components/MobileMoreDrawer';
-import { FlutterAppPackageModal } from './components/FlutterAppPackageModal';
 
 // Screens
 import { SplashScreen } from './screens/SplashScreen';
@@ -44,7 +43,6 @@ export function App() {
   // Modals
   const [viewingReceiptSale, setViewingReceiptSale] = useState<Sale | null>(null);
   const [isMobileMoreOpen, setIsMobileMoreOpen] = useState(false);
-  const [isFlutterModalOpen, setIsFlutterModalOpen] = useState(false);
 
   // Desktop Native POS Keyboard Shortcuts (F1 - F7)
   useEffect(() => {
@@ -459,7 +457,6 @@ export function App() {
           onToggleTheme={toggleTheme}
           onNavigate={setCurrentScreen}
           onLogout={handleLogout}
-          onOpenFlutterExport={() => setIsFlutterModalOpen(true)}
         />
       )}
 
@@ -469,7 +466,6 @@ export function App() {
             <Sidebar
               currentScreen={currentScreen}
               onNavigate={setCurrentScreen}
-              onOpenFlutterExport={() => setIsFlutterModalOpen(true)}
             />
           </div>
         )}
@@ -502,13 +498,6 @@ export function App() {
         isDarkMode={isDarkMode}
         onToggleTheme={toggleTheme}
         onLogout={handleLogout}
-        onOpenFlutterExport={() => setIsFlutterModalOpen(true)}
-      />
-
-      {/* Flutter Native App Download & Packaging Modal */}
-      <FlutterAppPackageModal
-        isOpen={isFlutterModalOpen}
-        onClose={() => setIsFlutterModalOpen(false)}
       />
     </div>
   );

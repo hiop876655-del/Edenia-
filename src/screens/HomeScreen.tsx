@@ -15,12 +15,9 @@ import {
   Sun,
   Moon,
   LogIn,
-  UserPlus,
-  Download
+  UserPlus
 } from 'lucide-react';
 import { ScreenType, UserAccount, LicenseState } from '../types';
-import { StandalonePackagesModal } from '../components/StandalonePackagesModal';
-import { NativeAppsExportModal } from '../components/NativeAppsExportModal';
 
 interface HomeScreenProps {
   user?: UserAccount | null;
@@ -41,9 +38,6 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
   onNavigateToLogin,
   onNavigateToRegister
 }) => {
-  const [isPackagesModalOpen, setIsPackagesModalOpen] = useState(false);
-  const [isNativeModalOpen, setIsNativeModalOpen] = useState(false);
-
   const navigate = (screen: ScreenType) => {
     if (screen === 'login' && onNavigateToLogin) {
       onNavigateToLogin();
@@ -84,15 +78,6 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
 
           {/* Quick Actions & Dark Mode */}
           <div className="flex items-center gap-3">
-            {/* Native Source Studio Button */}
-            <button
-              onClick={() => setIsNativeModalOpen(true)}
-              className="flex items-center gap-1.5 px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black rounded-xl shadow-xs transition-all cursor-pointer"
-            >
-              <Download className="w-4 h-4" />
-              <span>تحميل البرامج الأصلية (APK & EXE)</span>
-            </button>
-
             {/* Theme Toggle */}
             <button
               onClick={onToggleDarkMode}
@@ -296,17 +281,16 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
               يعمل على أجهزة كمبيوتر Windows وهواتف Android
             </h3>
             <p className="text-xs text-gray-600 dark:text-gray-300 max-w-xl">
-              يمكن تثبيت التطبيق مباشرة على سطح المكتب (Windows) وعلى شاشة الهاتف (Android) ليعمل كنافذة برنامج مستقلة بدون متصفح.
+              يمكن استخدام النظام مباشرة على الكمبيوتر أو الموبايل والبدء فوراً في إدارة الحسابات ونقاط البيع.
             </p>
           </div>
 
           <div className="flex flex-wrap items-center justify-center gap-3 shrink-0">
             <button
-              onClick={() => setIsPackagesModalOpen(true)}
-              className="flex items-center gap-2 bg-[#2E7D32] hover:bg-[#256628] text-white px-5 py-3 rounded-2xl font-black text-xs shadow-md transition-all cursor-pointer"
+              onClick={() => navigate(isMerchantLoggedIn ? (isLicensed ? 'dashboard' : 'activation') : 'login')}
+              className="flex items-center gap-2 bg-[#2E7D32] hover:bg-[#256628] text-white px-6 py-3.5 rounded-2xl font-black text-sm shadow-md transition-all cursor-pointer"
             >
-              <Download className="w-4 h-4" />
-              <span>تحميل وتثبيت البرنامج المستقل</span>
+              <span>{isMerchantLoggedIn ? 'فتح لوحة التحكم' : 'ابدأ استخدام النظام الآن'}</span>
             </button>
           </div>
         </section>
@@ -340,18 +324,6 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
           </div>
         </div>
       </footer>
-
-      {/* Standalone Packages Hub Modal */}
-      <StandalonePackagesModal
-        isOpen={isPackagesModalOpen}
-        onClose={() => setIsPackagesModalOpen(false)}
-      />
-
-      {/* 100% Native Studio Modal */}
-      <NativeAppsExportModal
-        isOpen={isNativeModalOpen}
-        onClose={() => setIsNativeModalOpen(false)}
-      />
     </div>
   );
 };

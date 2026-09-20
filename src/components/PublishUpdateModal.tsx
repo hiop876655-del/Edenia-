@@ -50,13 +50,19 @@ export const PublishUpdateModal: React.FC<PublishUpdateModalProps> = ({
     setLoading(true);
     setError(null);
     try {
+      const currentBuild = updateService.getCurrentBuild();
+      const currentVer = updateService.getCurrentVersion();
       const res = await updateService.checkForUpdates();
       if (res.latestRelease) {
         setCurrentRelease(res.latestRelease);
-        const nextBuild = (Number(res.latestRelease.buildNumber) || APP_BUILD_NUMBER) + 1;
+        const latestBuildNum = Number(res.latestRelease.buildNumber) || currentBuild;
+        const nextBuild = Math.max(latestBuildNum, currentBuild) + 1;
         setBuildNumber(nextBuild);
-        const nextVer = `v1.2.${nextBuild % 100}`;
-        setVersion(nextVer);
+        setVersion(`v1.2.${nextBuild % 100}`);
+      } else {
+        const nextBuild = currentBuild + 1;
+        setBuildNumber(nextBuild);
+        setVersion(`v1.2.${nextBuild % 100}`);
       }
       const allReleases = await updateService.getReleasesHistory();
       setHistory(allReleases);

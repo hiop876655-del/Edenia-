@@ -7,7 +7,6 @@ import {
   Settings,
   DatabaseBackup,
   UserCheck,
-  Zap,
   Moon,
   Sun,
   LogOut,
@@ -23,7 +22,6 @@ interface MobileMoreDrawerProps {
   isDarkMode: boolean;
   onToggleTheme: () => void;
   onLogout: () => void;
-  onOpenFlutterExport?: () => void;
 }
 
 export const MobileMoreDrawer: React.FC<MobileMoreDrawerProps> = ({
@@ -32,8 +30,7 @@ export const MobileMoreDrawer: React.FC<MobileMoreDrawerProps> = ({
   onNavigate,
   isDarkMode,
   onToggleTheme,
-  onLogout,
-  onOpenFlutterExport
+  onLogout
 }) => {
   if (!isOpen) return null;
 
@@ -54,23 +51,7 @@ export const MobileMoreDrawer: React.FC<MobileMoreDrawerProps> = ({
           </button>
         </div>
 
-        {/* Flutter App Export Tile */}
-        {onOpenFlutterExport && (
-          <button
-            onClick={() => {
-              onClose();
-              onOpenFlutterExport();
-            }}
-            className="w-full flex items-center justify-between p-3 rounded-2xl bg-gradient-to-r from-emerald-600 to-[#2E7D32] text-white font-bold text-xs shadow-md shadow-emerald-800/20 active:scale-95 transition-all cursor-pointer"
-          >
-            <div className="flex items-center gap-2">
-              <Zap className="w-4 h-4 text-amber-300" />
-              <span>تحميل البرامج (APK للأندرويد و Setup للويندوز)</span>
-            </div>
-            <span className="text-[10px] bg-white/20 px-2 py-0.5 rounded-full font-mono">تثبيت فوري</span>
-          </button>
-        )}
-
+        {/* Navigation Grid */}
         <div className="grid grid-cols-2 gap-2 text-xs">
           <button
             onClick={() => handleNav('home')}

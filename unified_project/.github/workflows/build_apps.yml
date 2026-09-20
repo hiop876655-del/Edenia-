@@ -1,0 +1,38 @@
+name: Build and Release Idenia Hisba (Windows EXE & Android Web App)
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    name: Build Native Windows Installer & Portable EXE
+    runs-on: windows-2022
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install Project Dependencies
+        run: npm ci || npm install
+
+      - name: Build React Production Bundle
+        run: npx vite build
+
+      - name: Build Windows Standalone EXE & Installer
+        run: npx electron-builder --win --x64
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload Windows Setup & Portable Executables
+        uses: actions/upload-artifact@v4
+        with:
+          name: Idenia-Hisba-Windows-Release
+          path: |
+            dist-electron/*.exe

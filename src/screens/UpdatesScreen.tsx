@@ -79,14 +79,20 @@ export const UpdatesScreen: React.FC<UpdatesScreenProps> = ({ onNavigateBack, on
     checkUpdates();
   }, []);
 
+  const currentVerDisplay = updateResult?.currentVersion || updateService.getCurrentVersion();
+  const currentBuildDisplay = updateResult?.currentBuild || updateService.getCurrentBuild();
+
   const handleApplyUpdate = async () => {
     if (isUpdating) return;
     setIsUpdating(true);
     try {
-      await updateService.applyLiveUpdate((step, percent) => {
-        setUpdateStepText(step);
-        setUpdateProgress(percent);
-      });
+      await updateService.applyLiveUpdate(
+        updateResult?.latestRelease,
+        (step, percent) => {
+          setUpdateStepText(step);
+          setUpdateProgress(percent);
+        }
+      );
     } catch (err) {
       alert('حدث خطأ أثناء تطبيق التحديث، يرجى المحاولة لاحقاً.');
       setIsUpdating(false);
@@ -158,9 +164,9 @@ export const UpdatesScreen: React.FC<UpdatesScreenProps> = ({ onNavigateBack, on
             <Layers className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
           </div>
           <div className="text-2xl font-black text-gray-900 dark:text-white font-mono flex items-baseline gap-2">
-            <span>v{APP_VERSION}</span>
+            <span>{currentVerDisplay.startsWith('v') ? currentVerDisplay : `v${currentVerDisplay}`}</span>
             <span className="text-xs font-normal text-gray-500 dark:text-gray-400 font-sans">
-              (بناء #{APP_BUILD_NUMBER})
+              (بناء #{currentBuildDisplay})
             </span>
           </div>
           <div className="text-[11px] text-gray-500 dark:text-gray-400 flex items-center gap-1.5">
@@ -299,7 +305,7 @@ export const UpdatesScreen: React.FC<UpdatesScreenProps> = ({ onNavigateBack, on
               البرنامج يعمل بأحدث إصدار رسمي مستقر
             </h3>
             <p className="text-xs text-gray-500 dark:text-gray-400 max-w-md mx-auto">
-              أنت تستخدم أحدث نسخة معتمدة (v{APP_VERSION}). عندما تقوم إدارة المنصة بنشر أي كود أو ميزة جديدة، ستظهر لك هنا فوراً لتثبيتها بنقرة واحدة.
+              أنت تستخدم أحدث نسخة معتمدة ({currentVerDisplay.startsWith('v') ? currentVerDisplay : `v${currentVerDisplay}`}). عندما تقوم إدارة المنصة بنشر أي كود أو ميزة جديدة، ستظهر لك هنا فوراً لتثبيتها بنقرة واحدة.
             </p>
           </div>
         </div>
@@ -314,35 +320,47 @@ export const UpdatesScreen: React.FC<UpdatesScreenProps> = ({ onNavigateBack, on
 
         {releasesHistory.length === 0 ? (
           <div className="text-xs text-gray-400 text-center py-6">
-            لا توجد إصدارات مؤرشفة سابقة حالياً، النظام يعمل بالإصدار الأساسي v{APP_VERSION}.
+            لا توجد إصدارات مؤرشفة سابقة حالياً، النظام يعمل بالإصدار الأساسي ({currentVerDisplay.startsWith('v') ? currentVerDisplay : `v${currentVerDisplay}`}).
           </div>
         ) : (
           <div className="space-y-3">
-            {releasesHistory.map(rel => (
-              <div
-                key={rel.id || rel.version}
-                className="p-4 rounded-2xl bg-gray-50 dark:bg-zinc-900/60 border border-gray-200 dark:border-gray-800/80 space-y-1.5"
-              >
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span className="font-mono font-bold text-sm text-emerald-700 dark:text-emerald-400">
-                      {rel.version}
-                    </span>
-                    <span className="font-bold text-sm text-gray-900 dark:text-gray-100">
-                      {rel.releaseTitle}
+            {releasesHistory.map(rel => {
+              const isCurrent = Number(rel.buildNumber) === Number(currentBuildDisplay);
+              return (
+                <div
+                  key={rel.id || rel.version}
+                  className={`p-4 rounded-2xl border space-y-1.5 ${
+                    isCurrent
+                      ? 'bg-emerald-50/70 dark:bg-emerald-950/40 border-emerald-300 dark:border-emerald-800'
+                      : 'bg-gray-50 dark:bg-zinc-900/60 border-gray-200 dark:border-gray-800/80'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-mono font-bold text-sm text-emerald-700 dark:text-emerald-400">
+                        {rel.version}
+                      </span>
+                      <span className="font-bold text-sm text-gray-900 dark:text-gray-100">
+                        {rel.releaseTitle}
+                      </span>
+                      {isCurrent && (
+                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-600 text-white font-bold">
+                          إصدارك الحالي 🟢
+                        </span>
+                      )}
+                    </div>
+                    <span className="text-[11px] text-gray-400 font-mono">
+                      {new Date(rel.publishedAt).toLocaleDateString('ar-EG')}
                     </span>
                   </div>
-                  <span className="text-[11px] text-gray-400 font-mono">
-                    {new Date(rel.publishedAt).toLocaleDateString('ar-EG')}
-                  </span>
+                  {rel.releaseNotes && (
+                    <p className="text-xs text-gray-600 dark:text-gray-400 whitespace-pre-line leading-relaxed">
+                      {rel.releaseNotes}
+                    </p>
+                  )}
                 </div>
-                {rel.releaseNotes && (
-                  <p className="text-xs text-gray-600 dark:text-gray-400 whitespace-pre-line leading-relaxed">
-                    {rel.releaseNotes}
-                  </p>
-                )}
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>

@@ -15,10 +15,7 @@ import {
   CheckCircle2,
   HardDrive,
   Printer,
-  ShieldCheck,
-  Smartphone,
-  Monitor,
-  ArrowDownToLine
+  ShieldCheck
 } from 'lucide-react';
 import { db } from '../services/db';
 import { DashboardStats, AppSettings, Sale, ScreenType } from '../types';
@@ -30,7 +27,6 @@ interface DashboardScreenProps {
   onOpenAddCustomer: () => void;
   onOpenRecordPayment: () => void;
   onViewInvoice: (sale: Sale) => void;
-  onOpenFlutterExport?: () => void;
 }
 
 export const DashboardScreen: React.FC<DashboardScreenProps> = ({
@@ -39,8 +35,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
   onOpenAddProduct,
   onOpenAddCustomer,
   onOpenRecordPayment,
-  onViewInvoice,
-  onOpenFlutterExport
+  onViewInvoice
 }) => {
   const [stats, setStats] = useState<DashboardStats>(db.getDashboardStats());
   const [settings, setSettings] = useState<AppSettings>(db.getSettings());
@@ -120,42 +115,6 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
             <span>•</span>
             <span>طابعة الفواتير: <strong className="text-emerald-300">{settings.print_thermal_width} حراري</strong></span>
           </p>
-        </div>
-
-        {/* Native Installers Direct Buttons */}
-        <div className="flex flex-wrap items-center gap-2">
-          <a
-            href="/api/download/android-apk"
-            download="idenia-hisba.apk"
-            className="flex items-center gap-1.5 bg-emerald-700 hover:bg-emerald-600 text-white px-3 py-2 rounded-xl font-black text-xs shadow-sm transition-all active:scale-95 shrink-0"
-            title="تحميل ملف APK مباشر وتثبيته فوراً على هاتف الأندرويد"
-          >
-            <Smartphone className="w-3.5 h-3.5 text-emerald-200" />
-            <span>تحميل APK أندرويد</span>
-            <ArrowDownToLine className="w-3.5 h-3.5" />
-          </a>
-
-          <a
-            href="/api/download/windows-setup"
-            download="idenia-hisba-windows-setup.zip"
-            className="flex items-center gap-1.5 bg-blue-700 hover:bg-blue-600 text-white px-3 py-2 rounded-xl font-black text-xs shadow-sm transition-all active:scale-95 shrink-0"
-            title="تحميل ملف ZIP يحتوي بداخله Setup.exe لتثبيت البرنامج على الكمبيوتر"
-          >
-            <Monitor className="w-3.5 h-3.5 text-blue-200" />
-            <span>تحميل سيت اب ويندوز (ZIP)</span>
-            <ArrowDownToLine className="w-3.5 h-3.5" />
-          </a>
-
-          {onOpenFlutterExport && (
-            <button
-              onClick={onOpenFlutterExport}
-              className="flex items-center gap-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 px-3 py-2 rounded-xl font-bold text-xs border border-zinc-700 transition-all cursor-pointer active:scale-95 shrink-0"
-              title="عرض كافة خيارات التثبيت والشرح"
-            >
-              <Zap className="w-3.5 h-3.5 text-amber-300" />
-              <span>خيارات التثبيت</span>
-            </button>
-          )}
         </div>
       </div>
 

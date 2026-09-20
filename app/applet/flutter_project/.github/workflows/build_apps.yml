@@ -1,0 +1,72 @@
+name: Build and Release Idenia Hisba (Windows EXE & Android APK)
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build-android:
+    name: Build Android APK (Release)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.24.3'
+          channel: 'stable'
+          cache: true
+
+      - name: Get Dependencies
+        run: flutter pub get
+
+      - name: Build APK Release (Standalone Offline)
+        run: flutter build apk --release --split-per-abi=false
+
+      - name: Upload Android APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Idenia-Hisba-Android-APK
+          path: build/app/outputs/flutter-apk/app-release.apk
+
+  build-windows:
+    name: Build Windows EXE (Release)
+    runs-on: windows-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Enable Windows Desktop Support
+        run: flutter config --enable-windows-desktop
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.24.3'
+          channel: 'stable'
+          cache: true
+
+      - name: Get Dependencies
+        run: flutter pub get
+
+      - name: Build Windows Desktop App
+        run: flutter build windows --release
+
+      - name: Create ZIP Package for Windows
+        run: |
+          Compress-Archive -Path build\windows\x64\runner\Release\* -DestinationPath Idenia-Hisba-Windows-x64.zip -Force
+
+      - name: Upload Windows Standalone Package
+        uses: actions/upload-artifact@v4
+        with:
+          name: Idenia-Hisba-Windows-ZIP
+          path: Idenia-Hisba-Windows-x64.zip

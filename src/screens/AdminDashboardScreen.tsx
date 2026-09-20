@@ -41,8 +41,6 @@ import {
 } from 'lucide-react';
 import { api, AdminMerchantRecord } from '../services/api';
 import { ScreenType } from '../types';
-import { StandalonePackagesModal } from '../components/StandalonePackagesModal';
-import { NativeAppsExportModal } from '../components/NativeAppsExportModal';
 import { PublishUpdateModal } from '../components/PublishUpdateModal';
 
 interface AdminDashboardScreenProps {
@@ -76,8 +74,6 @@ export const AdminDashboardScreen: React.FC<AdminDashboardScreenProps> = ({
   const [copiedPassword, setCopiedPassword] = useState(false);
 
   // Modals
-  const [isPackagesModalOpen, setIsPackagesModalOpen] = useState(false);
-  const [isNativeModalOpen, setIsNativeModalOpen] = useState(false);
   const [isPublishUpdateModalOpen, setIsPublishUpdateModalOpen] = useState(false);
 
   // Activation & Extension Modal state
@@ -994,15 +990,7 @@ export const AdminDashboardScreen: React.FC<AdminDashboardScreenProps> = ({
         </div>
       )}
 
-      {/* Export & Standalone modals */}
-      <StandalonePackagesModal
-        isOpen={isPackagesModalOpen}
-        onClose={() => setIsPackagesModalOpen(false)}
-      />
-      <NativeAppsExportModal
-        isOpen={isNativeModalOpen}
-        onClose={() => setIsNativeModalOpen(false)}
-      />
+      {/* Publish update modal */}
       <PublishUpdateModal
         isOpen={isPublishUpdateModalOpen}
         onClose={() => setIsPublishUpdateModalOpen(false)}

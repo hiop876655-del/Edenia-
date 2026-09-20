@@ -1,0 +1,7 @@
+{
+  "name": "ايدينيا - حِسبة",
+  "description": "برنامج حسابات ومخزن تجاري يدوي بالكامل لإدارة المبيعات والمخزون والعملاء والديون والأرباح مع نظام ترخيص زمني وحماية متقدمة.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+
