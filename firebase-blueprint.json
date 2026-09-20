@@ -1,0 +1,142 @@
+{
+  "entities": {
+    "licenses": {
+      "title": "License Codes",
+      "description": "Store license activation keys and status",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "code": {
+          "type": "string"
+        },
+        "durationLabel": {
+          "type": "string"
+        },
+        "durationMs": {
+          "type": "number"
+        },
+        "isUsed": {
+          "type": "boolean"
+        },
+        "usedByPhone": {
+          "type": "string"
+        },
+        "usedByShop": {
+          "type": "string"
+        },
+        "usedByFullName": {
+          "type": "string"
+        },
+        "usedDeviceId": {
+          "type": "string"
+        },
+        "usedAt": {
+          "type": "number"
+        },
+        "createdAt": {
+          "type": "number"
+        },
+        "expiresAt": {
+          "type": "number"
+        },
+        "isRevoked": {
+          "type": "boolean"
+        },
+        "notes": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "isUsed",
+        "createdAt"
+      ]
+    },
+    "merchants": {
+      "title": "Merchant Registrations",
+      "description": "Registered shop merchant profiles and devices",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "phone": {
+          "type": "string"
+        },
+        "fullName": {
+          "type": "string"
+        },
+        "shopName": {
+          "type": "string"
+        },
+        "tradeType": {
+          "type": "string"
+        },
+        "customTrade": {
+          "type": "string"
+        },
+        "deviceType": {
+          "type": "string"
+        },
+        "deviceId": {
+          "type": "string"
+        },
+        "osDetails": {
+          "type": "string"
+        },
+        "registeredAt": {
+          "type": "string"
+        },
+        "lastActive": {
+          "type": "string"
+        },
+        "currentLicenseCode": {
+          "type": "string"
+        },
+        "licenseExpiresAt": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "phone",
+        "shopName"
+      ]
+    },
+    "system_releases": {
+      "title": "System Releases & Updates",
+      "description": "Published app updates, version metadata and changelogs",
+      "type": "object",
+      "properties": {
+        "version": {
+          "type": "string"
+        },
+        "buildNumber": {
+          "type": "number"
+        },
+        "releaseTitle": {
+          "type": "string"
+        },
+        "releaseNotes": {
+          "type": "string"
+        },
+        "isForceUpdate": {
+          "type": "boolean"
+        },
+        "publishedBy": {
+          "type": "string"
+        },
+        "publishedAt": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "version",
+        "buildNumber",
+        "releaseTitle",
+        "publishedAt"
+      ]
+    }
+  }
+}

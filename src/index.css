@@ -1,0 +1,10 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@layer base {
+  body {
+    transition-property: color, background-color, border-color;
+    transition-duration: 150ms;
+  }
+}

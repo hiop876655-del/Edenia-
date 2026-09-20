@@ -1,0 +1,113 @@
+<Window x:Class="Idenia.Hisba.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="برنامج ايدينيا - حِسبة (نظام نقاط البيع وإدارة المحلات)" 
+        Height="720" Width="1100"
+        WindowStartupLocation="CenterScreen"
+        FlowDirection="RightToLeft"
+        Background="#F4F6F8"
+        FontFamily="Segoe UI, Tahoma">
+    
+    <Grid>
+        <!-- Activation Panel (When Not Activated) -->
+        <Border x:Name="ActivationPanel" Visibility="Visible" Background="#E0E7FF" Padding="30">
+            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Width="420">
+                <Border Background="White" CornerRadius="16" Padding="30" Effect="{DynamicResource DropShadow}">
+                    <StackPanel>
+                        <TextBlock Text="برنامج ايدينيا - حِسبة (Windows Native)" FontSize="18" FontWeight="Bold" Foreground="#1E1E1E" HorizontalAlignment="Center"/>
+                        <TextBlock Text="أدخل كود الترخيص لفتح برنامج المحل" FontSize="12" Foreground="#666" Margin="0,5,0,20" HorizontalAlignment="Center"/>
+
+                        <TextBlock Text="اسم المحل / النشاط:" FontWeight="SemiBold" FontSize="11"/>
+                        <TextBox x:Name="TxtShopName" Height="38" Margin="0,4,0,12" VerticalContentAlignment="Center" Padding="8"/>
+
+                        <TextBlock Text="رقم هاتف التاجر:" FontWeight="SemiBold" FontSize="11"/>
+                        <TextBox x:Name="TxtPhone" Height="38" Margin="0,4,0,12" VerticalContentAlignment="Center" Padding="8"/>
+
+                        <TextBlock Text="كود الترخيص:" FontWeight="SemiBold" FontSize="11"/>
+                        <TextBox x:Name="TxtLicenseCode" Height="38" Margin="0,4,0,16" VerticalContentAlignment="Center" Padding="8" CharacterCasing="Upper" FontFamily="Consolas"/>
+
+                        <Button x:Name="BtnActivate" Content="تفعيل البرنامج الآن" Height="42" Background="#2E7D32" Foreground="White" FontWeight="Bold" Click="BtnActivate_Click" Cursor="Hand"/>
+                        <TextBlock x:Name="TxtError" Foreground="Red" FontSize="11" TextWrapping="Wrap" Margin="0,10,0,0" HorizontalAlignment="Center" Visibility="Collapsed"/>
+                    </StackPanel>
+                </Border>
+            </StackPanel>
+        </Border>
+
+        <!-- Main Dashboard Panel (When Activated) -->
+        <Grid x:Name="DashboardPanel" Visibility="Collapsed">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="65"/>
+                <RowDefinition Height="*"/>
+            </Grid.RowDefinitions>
+
+            <!-- Top Header Bar -->
+            <Border Grid.Row="0" Background="#2E7D32" Padding="15,10">
+                <Grid>
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                        <TextBlock Text="برنامج ايدينيا - حِسبة" Foreground="White" FontSize="16" FontWeight="Bold"/>
+                        <TextBlock Text=" | نظام الكاشير والمخازن المكتبي الأصلي (100% Offline)" Foreground="#C8E6C9" FontSize="12" Margin="10,3,0,0"/>
+                    </StackPanel>
+                    <Border HorizontalAlignment="Left" Background="#1B5E20" CornerRadius="8" Padding="10,5">
+                        <TextBlock x:Name="TxtLicenseDays" Text="متبقي 30 يوم" Foreground="White" FontWeight="Bold" FontSize="11"/>
+                    </Border>
+                </Grid>
+            </Border>
+
+            <!-- Main Work Area -->
+            <Grid Grid.Row="1" Margin="20">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="2*"/>
+                    <ColumnDefinition Width="1*"/>
+                </Grid.ColumnDefinitions>
+
+                <!-- Left: Sales Cart & Barcode Input -->
+                <Border Grid.Column="0" Background="White" CornerRadius="12" Margin="0,0,15,0" Padding="15">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="50"/>
+                            <RowDefinition Height="*"/>
+                            <RowDefinition Height="80"/>
+                        </Grid.RowDefinitions>
+
+                        <!-- Barcode Scanner Input -->
+                        <Grid Grid.Row="0">
+                            <TextBox x:Name="TxtBarcode" Height="40" VerticalContentAlignment="Center" Padding="10" FontSize="14" Tag="امسح الباركود أو ابحث عن صنف..."/>
+                        </Grid>
+
+                        <!-- Cart Table -->
+                        <DataGrid Grid.Row="1" x:Name="GridCart" AutoGenerateColumns="False" Margin="0,10" Background="Transparent" BorderThickness="0">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="الصنف" Width="2*" Binding="{Binding Name}"/>
+                                <DataGridTextColumn Header="الكمية" Width="*" Binding="{Binding Qty}"/>
+                                <DataGridTextColumn Header="السعر" Width="*" Binding="{Binding Price}"/>
+                                <DataGridTextColumn Header="الإجمالي" Width="*" Binding="{Binding Total}"/>
+                            </DataGrid.Columns>
+                        </DataGrid>
+
+                        <!-- Total & Checkout -->
+                        <Border Grid.Row="2" Background="#F1F8E9" CornerRadius="8" Padding="15,10">
+                            <Grid>
+                                <StackPanel VerticalAlignment="Center">
+                                    <TextBlock Text="الإجمالي المستحق:" FontSize="11" Foreground="#555"/>
+                                    <TextBlock x:Name="TxtTotalAmount" Text="0.00 ج.م" FontSize="20" FontWeight="Bold" Foreground="#2E7D32"/>
+                                </StackPanel>
+                                <Button Content="حفظ وطباعة الفاتورة (F10)" HorizontalAlignment="Left" Width="180" Height="45" Background="#2E7D32" Foreground="White" FontWeight="Bold" Cursor="Hand" Click="BtnPrintInvoice_Click"/>
+                            </Grid>
+                        </Border>
+                    </Grid>
+                </Border>
+
+                <!-- Right: Quick Functions & Inventory -->
+                <Border Grid.Column="1" Background="White" CornerRadius="12" Padding="15">
+                    <StackPanel>
+                        <TextBlock Text="العمليات السريعة" FontWeight="Bold" FontSize="14" Margin="0,0,0,15"/>
+                        <Button Content="📦 إدارة المخزن والمنتجات" Height="45" Margin="0,0,0,10" Background="#F4F6F8" BorderBrush="#E0E0E0" FontWeight="SemiBold" Cursor="Hand"/>
+                        <Button Content="🧾 سجل الفواتير والمبيعات" Height="45" Margin="0,0,0,10" Background="#F4F6F8" BorderBrush="#E0E0E0" FontWeight="SemiBold" Cursor="Hand"/>
+                        <Button Content="👥 العملاء والحسابات الآجلة" Height="45" Margin="0,0,0,10" Background="#F4F6F8" BorderBrush="#E0E0E0" FontWeight="SemiBold" Cursor="Hand"/>
+                        <Button Content="🖨️ إعدادات الطابعة الحرارية USB" Height="45" Margin="0,0,0,10" Background="#F4F6F8" BorderBrush="#E0E0E0" FontWeight="SemiBold" Cursor="Hand"/>
+                    </StackPanel>
+                </Border>
+            </Grid>
+        </Grid>
+    </Grid>
+</Window>
