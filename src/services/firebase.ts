@@ -287,6 +287,19 @@ export async function loginMerchantInFirebase(phone: string, inputPassword: stri
   }
   const remainingDays = expiresAt > now ? Math.ceil((expiresAt - now) / 86400000) : 0;
 
+  // Retrieve cloud database config if saved
+  let cloudConfig = targetData.cloudDbConfig || null;
+  if (!cloudConfig) {
+    try {
+      const cfgSnap = await getDoc(doc(firestore, 'merchant_cloud_configs', `cfg_${cleanPhone}`));
+      if (cfgSnap.exists()) {
+        cloudConfig = cfgSnap.data();
+      }
+    } catch {
+      // Non-blocking
+    }
+  }
+
   return {
     success: true,
     user: {
@@ -304,7 +317,8 @@ export async function loginMerchantInFirebase(phone: string, inputPassword: stri
       subscriptionDays: targetData.subscriptionDays || 0,
       subscriptionExpiresAt: expiresAt,
       remainingDays,
-      isLoggedIn: true
+      isLoggedIn: true,
+      cloudDbConfig: cloudConfig
     }
   };
 }
@@ -414,5 +428,171 @@ export async function getAllAppReleasesFromFirebase(): Promise<SystemReleaseReco
     console.warn('Error fetching all releases:', err);
     return [];
   }
+}
+
+// ----------------- MERCHANT DEDICATED CLOUD DATABASE -----------------
+
+export interface MerchantCloudConfigRecord {
+  provider: 'supabase' | 'custom' | 'firebase';
+  projectUrl: string;
+  apiKey: string;
+  isConnected: boolean;
+  connectedAt?: number;
+  lastSyncedAt?: number;
+  merchantPhone?: string;
+  merchantShopName?: string;
+  updatedAt?: number;
+}
+
+export interface DatabaseTutorialSettingsRecord {
+  videoUrl: string;
+  thumbnailUrl: string;
+  title: string;
+  description: string;
+  providerRegisterUrl: string;
+  updatedAt?: number;
+}
+
+// 13. Save Merchant Cloud Database Config (Linked by Phone Number)
+export async function saveMerchantCloudConfigInFirebase(phone: string, config: MerchantCloudConfigRecord) {
+  const cleanPhone = phone.replace(/[^0-9]/g, '');
+  if (!cleanPhone) return { success: false, error: 'رقم هاتف غير صالح' };
+
+  const merchantDocId = `m_${cleanPhone}`;
+  const merchantRef = doc(firestore, 'merchants', merchantDocId);
+  const cloudConfigRef = doc(firestore, 'merchant_cloud_configs', `cfg_${cleanPhone}`);
+
+  const payload: MerchantCloudConfigRecord = {
+    ...config,
+    merchantPhone: cleanPhone,
+    updatedAt: Date.now()
+  };
+
+  // Save to config collection and update merchant profile with resilient write
+  try {
+    await Promise.allSettled([
+      setDoc(cloudConfigRef, payload, { merge: true }),
+      setDoc(merchantRef, { cloudDbConfig: payload, hasCloudDb: true, updatedAt: Date.now() }, { merge: true })
+    ]);
+  } catch (e) {
+    console.warn('Silent fallback on save cloud config:', e);
+  }
+
+  return { success: true, config: payload };
+}
+
+// 14. Get Merchant Cloud Database Config
+export async function getMerchantCloudConfigFromFirebase(phone: string): Promise<MerchantCloudConfigRecord | null> {
+  const cleanPhone = phone.replace(/[^0-9]/g, '');
+  if (!cleanPhone) return null;
+
+  try {
+    // 1. Check in merchant record first
+    const merchantRef = doc(firestore, 'merchants', `m_${cleanPhone}`);
+    const merchantSnap = await getDoc(merchantRef);
+    if (merchantSnap.exists()) {
+      const data = merchantSnap.data();
+      if (data.cloudDbConfig && data.cloudDbConfig.projectUrl && data.cloudDbConfig.apiKey) {
+        return data.cloudDbConfig as MerchantCloudConfigRecord;
+      }
+    }
+
+    // 2. Check in merchant_cloud_configs as fallback
+    const cloudConfigRef = doc(firestore, 'merchant_cloud_configs', `cfg_${cleanPhone}`);
+    const snap = await getDoc(cloudConfigRef);
+    if (snap.exists()) {
+      const cfg = snap.data() as MerchantCloudConfigRecord;
+      if (cfg && cfg.projectUrl && cfg.apiKey) {
+        return cfg;
+      }
+    }
+  } catch (err) {
+    console.warn('Could not fetch merchant cloud config:', err);
+  }
+  return null;
+}
+
+// 14.1. Save Merchant Full Data Snapshot to Central Cloud (For Cross-Device Roaming)
+export async function saveMerchantDataSnapshotInFirebase(phone: string, snapshot: any) {
+  const cleanPhone = phone.replace(/[^0-9]/g, '');
+  if (!cleanPhone || !snapshot) return { success: false };
+
+  try {
+    const backupRef = doc(firestore, 'merchants', `m_${cleanPhone}`, 'cloud_backup', 'latest');
+    const metaPayload = {
+      updatedAt: Date.now(),
+      isoDate: new Date().toISOString(),
+      merchantPhone: cleanPhone,
+      data: snapshot
+    };
+    await setDoc(backupRef, metaPayload, { merge: true });
+    return { success: true };
+  } catch (err) {
+    console.warn('Error saving merchant data snapshot in firebase:', err);
+    return { success: false };
+  }
+}
+
+// 14.2. Get Merchant Full Data Snapshot from Central Cloud
+export async function getMerchantDataSnapshotFromFirebase(phone: string): Promise<any | null> {
+  const cleanPhone = phone.replace(/[^0-9]/g, '');
+  if (!cleanPhone) return null;
+
+  try {
+    const backupRef = doc(firestore, 'merchants', `m_${cleanPhone}`, 'cloud_backup', 'latest');
+    const snap = await getDoc(backupRef);
+    if (snap.exists()) {
+      const val = snap.data();
+      return val?.data || null;
+    }
+  } catch (err) {
+    console.warn('Error getting merchant data snapshot from firebase:', err);
+  }
+  return null;
+}
+
+// 15. Admin: Save Database Tutorial Video & Link Settings
+export async function saveDatabaseTutorialSettingsInFirebase(settings: Partial<DatabaseTutorialSettingsRecord>) {
+  const isOnline = await checkRealInternetConnection(2500);
+  if (!isOnline) {
+    throw new Error('يلزم الاتصال بالإنترنت لحفظ إعدادات الفيديو سحابياً.');
+  }
+
+  const settingsRef = doc(firestore, 'system_config', 'database_tutorial');
+  const payload: DatabaseTutorialSettingsRecord = {
+    videoUrl: settings.videoUrl || '',
+    thumbnailUrl: settings.thumbnailUrl || '',
+    title: settings.title || 'شرح كيفية إنشاء وربط قاعدة بياناتك السحابية المجانية في دقيقتين',
+    description: settings.description || 'اتبع الخطوات في الفيديو لإنشاء مشروعك السحابي الخاص ونسخ رابط المشروع والمفتاح وربطهما فورا.',
+    providerRegisterUrl: settings.providerRegisterUrl || 'https://supabase.com/dashboard/sign-up',
+    updatedAt: Date.now()
+  };
+
+  await setDoc(settingsRef, payload, { merge: true });
+  return { success: true, settings: payload };
+}
+
+// 16. Get Database Tutorial Video & Link Settings
+export async function getDatabaseTutorialSettingsFromFirebase(): Promise<DatabaseTutorialSettingsRecord> {
+  const defaultSettings: DatabaseTutorialSettingsRecord = {
+    videoUrl: '',
+    thumbnailUrl: '',
+    title: 'شرح كيفية إنشاء وربط قاعدة بياناتك السحابية المجانية في دقيقتين',
+    description: 'اتبع الخطوات البسيطة في الفيديو لإنشاء مشروعك السحابي والحصول على رابط المشروع والمفتاح لربطهما بنقرة واحدة.',
+    providerRegisterUrl: 'https://supabase.com/dashboard/sign-up',
+    updatedAt: Date.now()
+  };
+
+  try {
+    const settingsRef = doc(firestore, 'system_config', 'database_tutorial');
+    const snap = await getDoc(settingsRef);
+    if (snap.exists()) {
+      return { ...defaultSettings, ...(snap.data() as DatabaseTutorialSettingsRecord) };
+    }
+  } catch (err) {
+    console.warn('Error fetching database tutorial settings:', err);
+  }
+
+  return defaultSettings;
 }
 

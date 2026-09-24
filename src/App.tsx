@@ -30,6 +30,8 @@ import { BackupScreen } from './screens/BackupScreen';
 import { AccountScreen } from './screens/AccountScreen';
 import { UpdatesScreen } from './screens/UpdatesScreen';
 import { AdminDashboardScreen } from './screens/AdminDashboardScreen';
+import { CloudDatabaseSetupScreen } from './screens/CloudDatabaseSetupScreen';
+import { cloudDatabaseService } from './services/cloudDatabase';
 
 export function App() {
   const [currentScreen, setCurrentScreen] = useState<ScreenType>('splash');
@@ -99,6 +101,11 @@ export function App() {
     const localLicense = db.getLicense();
     setUser(localUser);
     setLicense(localLicense);
+
+    // Auto restore cloud database and data for logged in merchant
+    if (localUser && localUser.isLoggedIn && localUser.phone) {
+      cloudDatabaseService.restoreMerchantDatabaseForDevice(localUser.phone).catch(console.warn);
+    }
   }, []);
 
   // Periodic License & Cloud Tamper/Freeze/Expiration verification
@@ -171,20 +178,33 @@ export function App() {
     localCheck();
     syncCloudStatus();
 
+    // Sync merchant business data to cloud
+    const syncMerchantData = () => {
+      if (user?.phone && user.role !== 'admin') {
+        cloudDatabaseService.syncAllDataToCloud().catch(console.warn);
+      }
+    };
+    syncMerchantData();
+
     // Run periodic cloud check every 20 seconds
     const interval = setInterval(() => {
       localCheck();
       syncCloudStatus();
     }, 20000);
 
+    // Sync business data every 60 seconds
+    const dataSyncInterval = setInterval(syncMerchantData, 60000);
+
     // Re-check immediately when browser/device connects to internet
     const handleOnline = () => {
       syncCloudStatus();
+      syncMerchantData();
     };
     window.addEventListener('online', handleOnline);
 
     return () => {
       clearInterval(interval);
+      clearInterval(dataSyncInterval);
       window.removeEventListener('online', handleOnline);
     };
   }, [license, user, currentScreen]);
@@ -250,6 +270,11 @@ export function App() {
   const handleLoginSuccess = (account: UserAccount) => {
     setUser(account);
 
+    // Auto-restore merchant cloud database for this device
+    if (account.phone) {
+      cloudDatabaseService.restoreMerchantDatabaseForDevice(account.phone).catch(console.warn);
+    }
+
     // If Master Admin
     if (account.role === 'admin' || account.phone === '01121097822') {
       setCurrentScreen('admin');
@@ -257,7 +282,7 @@ export function App() {
     }
 
     const lic = db.getLicense();
-    if (!lic || !lic.isValid) {
+    if (!lic || !lic.isValid || (lic.phone && lic.phone !== account.phone)) {
       setCurrentScreen('activation');
     } else {
       setLicense(lic);
@@ -276,6 +301,52 @@ export function App() {
   };
 
   const renderCurrentScreen = () => {
+    // Route guard for internal merchant screens
+    const internalScreens: ScreenType[] = [
+      'dashboard', 'inventory', 'products', 'sales', 'customers', 'debts',
+      'reports', 'settings', 'cloud_database_setup', 'backup', 'account', 'updates'
+    ];
+
+    if (internalScreens.includes(currentScreen)) {
+      if (!user || !user.isLoggedIn) {
+        return (
+          <HomeScreen
+            user={user}
+            license={license}
+            darkMode={isDarkMode}
+            onToggleDarkMode={toggleTheme}
+            onNavigate={setCurrentScreen}
+            onNavigateToLogin={() => setCurrentScreen('login')}
+            onNavigateToRegister={() => setCurrentScreen('register')}
+          />
+        );
+      }
+
+      const isMasterAdmin = user.role === 'admin' || user.phone === '01121097822';
+      if (!isMasterAdmin) {
+        if (!license || !license.isValid || (license.phone && license.phone !== user.phone)) {
+          return (
+            <LicenseActivationScreen
+              user={user}
+              onSuccess={handleActivationSuccess}
+              onLogout={handleLogout}
+              onNavigateToHome={() => setCurrentScreen('home')}
+            />
+          );
+        }
+
+        if (license.expiresAt <= Date.now()) {
+          return (
+            <ExpiredScreen
+              user={user}
+              onRenewSuccess={handleActivationSuccess}
+              onLogout={handleLogout}
+            />
+          );
+        }
+      }
+    }
+
     switch (currentScreen) {
       case 'splash':
         return <SplashScreen onComplete={screen => setCurrentScreen(screen)} />;
@@ -353,7 +424,6 @@ export function App() {
             onOpenAddCustomer={() => setCurrentScreen('customers')}
             onOpenRecordPayment={() => setCurrentScreen('debts')}
             onViewInvoice={sale => setViewingReceiptSale(sale)}
-            onOpenFlutterExport={() => setIsFlutterModalOpen(true)}
           />
         );
 
@@ -400,6 +470,16 @@ export function App() {
           <SettingsScreen
             isDarkMode={isDarkMode}
             onToggleTheme={toggleTheme}
+            onNavigate={setCurrentScreen}
+          />
+        );
+
+      case 'cloud_database_setup':
+        return (
+          <CloudDatabaseSetupScreen
+            user={user}
+            onNavigate={setCurrentScreen}
+            onSuccess={() => setCurrentScreen('dashboard')}
           />
         );
 

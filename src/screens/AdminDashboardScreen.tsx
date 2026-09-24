@@ -37,11 +37,15 @@ import {
   MessageSquare,
   Filter,
   PlusCircle,
-  HelpCircle
+  HelpCircle,
+  Video
 } from 'lucide-react';
 import { api, AdminMerchantRecord } from '../services/api';
 import { ScreenType } from '../types';
 import { PublishUpdateModal } from '../components/PublishUpdateModal';
+import { AdminCloudTutorialModal } from '../components/AdminCloudTutorialModal';
+import { StandalonePackagesModal } from '../components/StandalonePackagesModal';
+import { NativeAppsExportModal } from '../components/NativeAppsExportModal';
 
 interface AdminDashboardScreenProps {
   onNavigate?: (screen: ScreenType) => void;
@@ -75,6 +79,9 @@ export const AdminDashboardScreen: React.FC<AdminDashboardScreenProps> = ({
 
   // Modals
   const [isPublishUpdateModalOpen, setIsPublishUpdateModalOpen] = useState(false);
+  const [isCloudTutorialModalOpen, setIsCloudTutorialModalOpen] = useState(false);
+  const [isPackagesModalOpen, setIsPackagesModalOpen] = useState(false);
+  const [isNativeModalOpen, setIsNativeModalOpen] = useState(false);
 
   // Activation & Extension Modal state
   const [activeModalTarget, setActiveModalTarget] = useState<{
@@ -280,6 +287,14 @@ export const AdminDashboardScreen: React.FC<AdminDashboardScreenProps> = ({
           </div>
 
           <div className="flex flex-wrap items-center gap-2.5 w-full md:w-auto justify-end">
+            <button
+              onClick={() => setIsCloudTutorialModalOpen(true)}
+              className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-amber-600 to-orange-600 text-white text-xs font-bold hover:from-amber-700 hover:to-orange-700 shadow-md shadow-amber-900/20 transition-all flex items-center gap-1.5 cursor-pointer"
+            >
+              <Video className="w-4 h-4 text-amber-200" />
+              <span>إعدادات فيديو شرح السحابة</span>
+            </button>
+
             <button
               onClick={() => setIsPublishUpdateModalOpen(true)}
               className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 text-white text-xs font-bold hover:from-emerald-700 hover:to-teal-700 shadow-md shadow-emerald-900/20 transition-all flex items-center gap-1.5 cursor-pointer"
@@ -995,6 +1010,25 @@ export const AdminDashboardScreen: React.FC<AdminDashboardScreenProps> = ({
         isOpen={isPublishUpdateModalOpen}
         onClose={() => setIsPublishUpdateModalOpen(false)}
         onPublished={msg => setActionMessage(msg)}
+      />
+
+      {/* Cloud Tutorial Video Settings modal */}
+      <AdminCloudTutorialModal
+        isOpen={isCloudTutorialModalOpen}
+        onClose={() => setIsCloudTutorialModalOpen(false)}
+        onSaved={msg => showNotice(msg)}
+      />
+
+      {/* Standalone Packages modal */}
+      <StandalonePackagesModal
+        isOpen={isPackagesModalOpen}
+        onClose={() => setIsPackagesModalOpen(false)}
+      />
+
+      {/* Native Apps Source Export modal */}
+      <NativeAppsExportModal
+        isOpen={isNativeModalOpen}
+        onClose={() => setIsNativeModalOpen(false)}
       />
     </div>
   );

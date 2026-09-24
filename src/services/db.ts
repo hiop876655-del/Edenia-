@@ -43,12 +43,38 @@ const DEFAULT_SETTINGS: AppSettings = {
 };
 
 class LocalDatabase {
-  private get<T>(key: string, defaultValue: T): T {
-    return loadEncryptedItem<T>(key, defaultValue);
+  private getScopedKey(baseKey: string, explicitPhone?: string): string {
+    if (baseKey === STORAGE_KEYS.USER) {
+      return baseKey;
+    }
+    const phone = explicitPhone || loadEncryptedItem<UserAccount | null>(STORAGE_KEYS.USER, null)?.phone;
+    if (phone) {
+      const cleanPhone = phone.replace(/[^0-9]/g, '');
+      if (cleanPhone) {
+        return `${baseKey}_${cleanPhone}`;
+      }
+    }
+    return baseKey;
   }
 
-  private set<T>(key: string, value: T): void {
-    saveEncryptedItem(key, value);
+  private get<T>(key: string, defaultValue: T, explicitPhone?: string): T {
+    return loadEncryptedItem<T>(this.getScopedKey(key, explicitPhone), defaultValue);
+  }
+
+  private set<T>(key: string, value: T, explicitPhone?: string): void {
+    saveEncryptedItem(this.getScopedKey(key, explicitPhone), value);
+  }
+
+  private triggerCloudSync() {
+    if (typeof window !== 'undefined') {
+      setTimeout(() => {
+        try {
+          import('./cloudDatabase').then(m => {
+            m.cloudDatabaseService.syncAllDataToCloud().catch(() => {});
+          }).catch(() => {});
+        } catch {}
+      }, 30);
+    }
   }
 
   // --- Initial Data Clean (Zero dummy data, only user inputs) ---
@@ -73,6 +99,16 @@ class LocalDatabase {
     if (filteredDebts.length !== existingDebts.length) {
       this.set(STORAGE_KEYS.DEBTS, filteredDebts);
     }
+
+    // Purge legacy unpartitioned root keys if present
+    try {
+      if (localStorage.getItem('idenia_hisba_sales_v1')) {
+        localStorage.removeItem('idenia_hisba_sales_v1');
+      }
+      if (localStorage.getItem('idenia_hisba_products_v1')) {
+        localStorage.removeItem('idenia_hisba_products_v1');
+      }
+    } catch {}
   }
 
   // --- PRODUCTS ---
@@ -117,6 +153,7 @@ class LocalDatabase {
             reason: 'تعديل يدوي لكمية المخزون'
           });
         }
+        this.triggerCloudSync();
         return updated;
       }
     }
@@ -149,6 +186,7 @@ class LocalDatabase {
       reason: 'إضافة صنف جديد للمخزن'
     });
 
+    this.triggerCloudSync();
     return newProd;
   }
 
@@ -157,6 +195,7 @@ class LocalDatabase {
     const filtered = products.filter(p => p.id !== id);
     if (filtered.length !== products.length) {
       this.set(STORAGE_KEYS.PRODUCTS, filtered);
+      this.triggerCloudSync();
       return true;
     }
     return false;
@@ -182,9 +221,10 @@ class LocalDatabase {
       quantity: Math.abs(deltaQty),
       previous_quantity: prev,
       new_quantity: next,
-      reason
+      reason: reason || 'تسوية رصيد مخزني'
     });
 
+    this.triggerCloudSync();
     return true;
   }
 
@@ -346,6 +386,7 @@ class LocalDatabase {
     const sales = this.getSales();
     sales.unshift(newSale);
     this.set(STORAGE_KEYS.SALES, sales);
+    this.triggerCloudSync();
 
     return { success: true, sale: newSale };
   }
@@ -373,6 +414,7 @@ class LocalDatabase {
         } as Customer;
         customers[idx] = updated;
         this.set(STORAGE_KEYS.CUSTOMERS, customers);
+        this.triggerCloudSync();
         return updated;
       }
     }
@@ -391,6 +433,7 @@ class LocalDatabase {
 
     customers.unshift(newCustomer);
     this.set(STORAGE_KEYS.CUSTOMERS, customers);
+    this.triggerCloudSync();
     return newCustomer;
   }
 
@@ -399,6 +442,7 @@ class LocalDatabase {
     const filtered = customers.filter(c => c.id !== id);
     if (filtered.length !== customers.length) {
       this.set(STORAGE_KEYS.CUSTOMERS, filtered);
+      this.triggerCloudSync();
       return true;
     }
     return false;
@@ -462,6 +506,7 @@ class LocalDatabase {
     debts.unshift(newDebt);
     this.set(STORAGE_KEYS.DEBTS, debts);
     this.recalculateCustomerDebt(customer_id);
+    this.triggerCloudSync();
 
     return newDebt;
   }
@@ -538,6 +583,7 @@ class LocalDatabase {
 
     this.set(STORAGE_KEYS.DEBTS, debts);
     this.recalculateCustomerDebt(customer_id);
+    this.triggerCloudSync();
 
     return { success: true, payment: newPayment };
   }
@@ -587,6 +633,7 @@ class LocalDatabase {
     const current = this.getSettings();
     const updated = { ...current, ...settings };
     this.set(STORAGE_KEYS.SETTINGS, updated);
+    this.triggerCloudSync();
     return updated;
   }
 
@@ -605,10 +652,23 @@ class LocalDatabase {
 
   // --- LICENSE STATE ---
   public getLicense(): LicenseState | null {
-    return this.get<LicenseState | null>(STORAGE_KEYS.LICENSE, null);
+    const user = this.getUser();
+    if (!user || !user.phone) {
+      return this.get<LicenseState | null>(STORAGE_KEYS.LICENSE, null);
+    }
+    const lic = this.get<LicenseState | null>(STORAGE_KEYS.LICENSE, null, user.phone);
+    if (lic && lic.phone && lic.phone !== user.phone) {
+      return null;
+    }
+    return lic;
   }
 
   public saveLicense(lic: LicenseState): void {
+    const user = this.getUser();
+    const phone = (lic as any).phone || user?.phone;
+    if (phone) {
+      this.set(STORAGE_KEYS.LICENSE, { ...lic, phone }, phone);
+    }
     this.set(STORAGE_KEYS.LICENSE, lic);
   }
 
@@ -700,6 +760,23 @@ class LocalDatabase {
       return { success: true };
     } catch (err: any) {
       return { success: false, error: 'فشل في قراءة ملف النسخة: ' + err.message };
+    }
+  }
+
+  public restoreStoreData(data: any): boolean {
+    if (!data) return false;
+    try {
+      if (Array.isArray(data.products)) this.set(STORAGE_KEYS.PRODUCTS, data.products);
+      if (Array.isArray(data.sales)) this.set(STORAGE_KEYS.SALES, data.sales);
+      if (Array.isArray(data.customers)) this.set(STORAGE_KEYS.CUSTOMERS, data.customers);
+      if (Array.isArray(data.debts)) this.set(STORAGE_KEYS.DEBTS, data.debts);
+      if (Array.isArray(data.debt_payments)) this.set(STORAGE_KEYS.DEBT_PAYMENTS, data.debt_payments);
+      if (Array.isArray(data.stock_movements)) this.set(STORAGE_KEYS.STOCK_MOVEMENTS, data.stock_movements);
+      if (data.settings && typeof data.settings === 'object') this.set(STORAGE_KEYS.SETTINGS, data.settings);
+      return true;
+    } catch (err) {
+      console.warn('Error restoring store data:', err);
+      return false;
     }
   }
 

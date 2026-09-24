@@ -48,8 +48,9 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
     }
   };
 
+  const isAdmin = !!user && (user.role === 'admin' || user.phone === '01121097822');
   const isMerchantLoggedIn = !!user && user.isLoggedIn;
-  const isLicensed = !!license && license.isValid;
+  const isLicensed = isAdmin || (!!license && license.isValid && (!license.phone || license.phone === user?.phone) && license.expiresAt > Date.now());
 
   return (
     <div className="min-h-screen bg-[#F8F9FA] dark:bg-[#121212] text-[#212121] dark:text-gray-100 flex flex-col justify-between transition-colors selection:bg-[#2E7D32] selection:text-white" dir="rtl">
@@ -89,13 +90,31 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
 
             {/* Direct Login or App Access */}
             {isMerchantLoggedIn ? (
-              <button
-                onClick={() => navigate(isLicensed ? 'dashboard' : 'activation')}
-                className="flex items-center gap-2 px-4 py-2.5 bg-[#2E7D32] hover:bg-[#256628] text-white text-xs font-black rounded-xl shadow-xs transition-all cursor-pointer"
-              >
-                <span>الدخول لبرنامج المحل</span>
-                <ArrowLeft className="w-4 h-4" />
-              </button>
+              isAdmin ? (
+                <button
+                  onClick={() => navigate('admin')}
+                  className="flex items-center gap-2 px-4 py-2.5 bg-[#2E7D32] hover:bg-[#256628] text-white text-xs font-black rounded-xl shadow-xs transition-all cursor-pointer"
+                >
+                  <ShieldCheck className="w-4 h-4" />
+                  <span>لوحة تحكم الإدارة</span>
+                </button>
+              ) : isLicensed ? (
+                <button
+                  onClick={() => navigate('dashboard')}
+                  className="flex items-center gap-2 px-4 py-2.5 bg-[#2E7D32] hover:bg-[#256628] text-white text-xs font-black rounded-xl shadow-xs transition-all cursor-pointer"
+                >
+                  <span>الدخول لبرنامج المحل</span>
+                  <ArrowLeft className="w-4 h-4" />
+                </button>
+              ) : (
+                <button
+                  onClick={() => navigate('activation')}
+                  className="flex items-center gap-2 px-4 py-2.5 bg-amber-600 hover:bg-amber-700 text-white text-xs font-black rounded-xl shadow-xs transition-all cursor-pointer"
+                >
+                  <span>تفعيل الاشتراك ⏳</span>
+                  <ArrowLeft className="w-4 h-4" />
+                </button>
+              )
             ) : (
               <button
                 onClick={() => navigate('login')}
@@ -144,18 +163,51 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                   </div>
                 </div>
 
-                <span className="text-[11px] font-bold bg-emerald-50 dark:bg-emerald-950/60 text-[#2E7D32] dark:text-[#66BB6A] px-2.5 py-1 rounded-full border border-emerald-200 dark:border-emerald-800">
-                  حساب مسجل ✓
-                </span>
+                {isAdmin ? (
+                  <span className="text-[11px] font-bold bg-purple-100 dark:bg-purple-950/60 text-purple-800 dark:text-purple-300 px-2.5 py-1 rounded-full border border-purple-200 dark:border-purple-800">
+                    مدير المنصة ⚡
+                  </span>
+                ) : isLicensed ? (
+                  <span className="text-[11px] font-bold bg-emerald-50 dark:bg-emerald-950/60 text-[#2E7D32] dark:text-[#66BB6A] px-2.5 py-1 rounded-full border border-emerald-200 dark:border-emerald-800">
+                    اشتراك نشط ✓
+                  </span>
+                ) : (
+                  <span className="text-[11px] font-bold bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 px-2.5 py-1 rounded-full border border-amber-200 dark:border-amber-800 animate-pulse">
+                    بانتظار تفعيل الإدارة ⏳
+                  </span>
+                )}
               </div>
 
-              <button
-                onClick={() => navigate(isLicensed ? 'dashboard' : 'activation')}
-                className="w-full py-4 bg-[#2E7D32] hover:bg-[#256628] active:scale-[0.99] text-white font-black text-base rounded-2xl shadow-md hover:shadow-lg transition-all flex items-center justify-center gap-3 cursor-pointer"
-              >
-                <span>الدخول إلى برنامج المحل (المخزن ونقاط البيع)</span>
-                <ArrowLeft className="w-5 h-5" />
-              </button>
+              {isAdmin ? (
+                <button
+                  onClick={() => navigate('admin')}
+                  className="w-full py-4 bg-[#2E7D32] hover:bg-[#256628] active:scale-[0.99] text-white font-black text-base rounded-2xl shadow-md hover:shadow-lg transition-all flex items-center justify-center gap-3 cursor-pointer"
+                >
+                  <ShieldCheck className="w-5 h-5" />
+                  <span>الدخول إلى لوحة إدارة المنصة</span>
+                </button>
+              ) : isLicensed ? (
+                <button
+                  onClick={() => navigate('dashboard')}
+                  className="w-full py-4 bg-[#2E7D32] hover:bg-[#256628] active:scale-[0.99] text-white font-black text-base rounded-2xl shadow-md hover:shadow-lg transition-all flex items-center justify-center gap-3 cursor-pointer"
+                >
+                  <span>الدخول إلى برنامج المحل (المخزن ونقاط البيع)</span>
+                  <ArrowLeft className="w-5 h-5" />
+                </button>
+              ) : (
+                <div className="space-y-2">
+                  <p className="text-xs text-amber-800 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/30 p-2.5 rounded-xl border border-amber-200 dark:border-amber-800/50">
+                    حسابك مسجل وبانتظار تفعيل الاشتراك من إدارة المنصة لتشغيل البرنامج.
+                  </p>
+                  <button
+                    onClick={() => navigate('activation')}
+                    className="w-full py-4 bg-gradient-to-r from-amber-600 to-amber-700 hover:from-amber-700 hover:to-amber-800 active:scale-[0.99] text-white font-black text-base rounded-2xl shadow-md hover:shadow-lg transition-all flex items-center justify-center gap-3 cursor-pointer"
+                  >
+                    <span>متابعة تفعيل الحساب مع الإدارة 📱</span>
+                    <ArrowLeft className="w-5 h-5" />
+                  </button>
+                </div>
+              )}
             </div>
           ) : (
             <div className="pt-4 flex flex-col sm:flex-row items-center justify-center gap-4 max-w-md mx-auto">

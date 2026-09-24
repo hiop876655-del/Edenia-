@@ -11,7 +11,8 @@ import {
   Sun,
   LogOut,
   Home,
-  Sparkles
+  Sparkles,
+  Cloud
 } from 'lucide-react';
 import { ScreenType } from '../types';
 
@@ -91,6 +92,14 @@ export const MobileMoreDrawer: React.FC<MobileMoreDrawerProps> = ({
           >
             <Settings className="w-4 h-4 text-gray-600" />
             <span>الإعدادات والطباعة</span>
+          </button>
+
+          <button
+            onClick={() => handleNav('cloud_database_setup')}
+            className="flex items-center gap-2.5 p-3 rounded-2xl bg-emerald-50 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-300 font-bold border border-emerald-200 dark:border-emerald-800/60 hover:shadow-xs transition-all cursor-pointer"
+          >
+            <Cloud className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+            <span>ربط السحابة المستقلة</span>
           </button>
 
           <button

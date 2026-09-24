@@ -15,7 +15,7 @@ import {
   where,
   orderBy
 } from 'firebase/firestore';
-import config from '../../firebase-applet-config.json';
+import config from '../../../firebase-applet-config.json';
 import { checkRealInternetConnection } from './network';
 import { getDeviceId } from './device';
 

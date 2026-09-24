@@ -124,8 +124,16 @@ export const RegisterScreen: React.FC<RegisterScreenProps> = ({
         isLoggedIn: true
       };
 
-      // Save locally
+      // Save locally with pending license (strictly locked until approved by admin)
       db.saveUser(userAccount);
+      db.saveLicense({
+        isValid: false,
+        isExpired: true,
+        durationDays: 0,
+        expiresAt: 0,
+        status: 'pending',
+        phone: userAccount.phone
+      } as any);
       db.saveSettings({
         shop_name: shopName.trim(),
         owner_name: fullName.trim(),

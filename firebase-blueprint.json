@@ -137,6 +137,36 @@
         "releaseTitle",
         "publishedAt"
       ]
+    },
+    "merchant_cloud_configs": {
+      "title": "Merchant Cloud Database Configs",
+      "description": "Supabase or cloud DB credentials linked to merchant phone",
+      "type": "object",
+      "properties": {
+        "provider": { "type": "string" },
+        "projectUrl": { "type": "string" },
+        "apiKey": { "type": "string" },
+        "isConnected": { "type": "boolean" },
+        "merchantPhone": { "type": "string" },
+        "merchantShopName": { "type": "string" },
+        "connectedAt": { "type": "number" },
+        "lastSyncedAt": { "type": "number" },
+        "updatedAt": { "type": "number" }
+      },
+      "required": ["projectUrl", "apiKey", "merchantPhone"]
+    },
+    "system_config": {
+      "title": "System Global Configuration",
+      "description": "Global tutorials, video URLs, and platform parameters",
+      "type": "object",
+      "properties": {
+        "videoUrl": { "type": "string" },
+        "thumbnailUrl": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "providerRegisterUrl": { "type": "string" },
+        "updatedAt": { "type": "number" }
+      }
     }
   }
 }

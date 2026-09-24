@@ -13,7 +13,8 @@ import {
   Zap,
   PlusCircle,
   HardDrive,
-  Sparkles
+  Sparkles,
+  Cloud
 } from 'lucide-react';
 import { ScreenType } from '../types';
 
@@ -74,6 +75,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
       id: 'settings' as ScreenType,
       label: 'الإعدادات والطباعة',
       icon: Settings
+    },
+    {
+      id: 'cloud_database_setup' as ScreenType,
+      label: 'ربط السحابة المستقلة',
+      icon: Cloud,
+      highlight: true
     },
     {
       id: 'backup' as ScreenType,

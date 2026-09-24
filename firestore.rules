@@ -7,6 +7,15 @@ service cloud.firestore {
     match /merchants/{merchantId} {
       allow read, write: if true;
     }
+    match /merchants/{merchantId}/{allSubcollections=**} {
+      allow read, write: if true;
+    }
+    match /merchant_cloud_configs/{configId} {
+      allow read, write: if true;
+    }
+    match /system_config/{configId} {
+      allow read, write: if true;
+    }
     match /system_releases/{releaseId} {
       allow read, write: if true;
     }

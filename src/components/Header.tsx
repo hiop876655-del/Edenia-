@@ -76,39 +76,6 @@ export const Header: React.FC<HeaderProps> = ({
 
   return (
     <header className="sticky top-0 z-30 select-none bg-white dark:bg-[#1A1A1A] border-b border-gray-200 dark:border-gray-800/80 shadow-xs transition-colors" dir="rtl">
-      {/* Simulated Desktop Window Frame Bar */}
-      <div className="hidden md:flex items-center justify-between px-3 py-1 bg-gray-100/90 dark:bg-zinc-900/90 border-b border-gray-200/70 dark:border-zinc-800 text-[11px] text-gray-500 dark:text-gray-400 font-medium">
-        <div className="flex items-center gap-2">
-          <div className="flex items-center gap-1.5 font-bold text-gray-700 dark:text-gray-300">
-            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-            <span>ايدينيا - حِسبة [تطبيق سطح المكتب والأندرويد المستقل]</span>
-          </div>
-          <span className="text-gray-300 dark:text-zinc-700">•</span>
-          <span className="text-emerald-700 dark:text-emerald-400 font-semibold">SQLite محلي أوفلاين 100%</span>
-        </div>
-
-        {/* Hotkeys Bar for desktop */}
-        <div className="flex items-center gap-2 font-mono text-[10px]">
-          <span className="bg-white dark:bg-zinc-800 px-1.5 py-0.5 rounded border border-gray-200 dark:border-zinc-700 text-gray-700 dark:text-gray-300">F1: الرئيسية</span>
-          <span className="bg-white dark:bg-zinc-800 px-1.5 py-0.5 rounded border border-gray-200 dark:border-zinc-700 text-emerald-700 dark:text-emerald-400 font-bold">F2: الكاشير</span>
-          <span className="bg-white dark:bg-zinc-800 px-1.5 py-0.5 rounded border border-gray-200 dark:border-zinc-700 text-gray-700 dark:text-gray-300">F3: المخزن</span>
-          <span className="bg-white dark:bg-zinc-800 px-1.5 py-0.5 rounded border border-gray-200 dark:border-zinc-700 text-gray-700 dark:text-gray-300">F5: العملاء</span>
-        </div>
-
-        {/* Window controls styling (pure native app feeling) */}
-        <div className="flex items-center gap-1 text-gray-400">
-          <span title="تصغير" className="p-1 hover:bg-gray-200 dark:hover:bg-zinc-800 rounded cursor-pointer">
-            <Minus className="w-3 h-3" />
-          </span>
-          <span title="تكبير" className="p-1 hover:bg-gray-200 dark:hover:bg-zinc-800 rounded cursor-pointer">
-            <Square className="w-2.5 h-2.5" />
-          </span>
-          <span title="إغلاق البرنامج" className="p-1 hover:bg-red-500 hover:text-white rounded cursor-pointer transition-colors">
-            <X className="w-3 h-3" />
-          </span>
-        </div>
-      </div>
-
       {/* Main App Bar */}
       <div className="flex items-center justify-between px-3 md:px-5 py-2">
         {/* Brand & Shop Info */}

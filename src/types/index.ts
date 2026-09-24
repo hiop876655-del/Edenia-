@@ -47,6 +47,7 @@ export interface UserAccount {
   subscriptionDays?: number;
   subscriptionExpiresAt?: number;
   subscriptionActivatedAt?: number;
+  cloudDbConfig?: MerchantCloudConfig;
 }
 
 export interface Sale {
@@ -145,6 +146,7 @@ export interface AppSettings {
 
 export interface LicenseState {
   code?: string;
+  phone?: string;
   durationDays: number;
   createdAt: number;
   expiresAt: number;
@@ -204,4 +206,25 @@ export type ScreenType =
   | 'updates'
   | 'expired'
   | 'admin'
-  | 'admin_dashboard';
+  | 'admin_dashboard'
+  | 'cloud_database_setup';
+
+export interface MerchantCloudConfig {
+  provider: 'supabase' | 'custom' | 'firebase';
+  projectUrl: string;
+  apiKey: string;
+  isConnected: boolean;
+  connectedAt?: number;
+  lastSyncedAt?: number;
+  merchantPhone?: string;
+  merchantShopName?: string;
+}
+
+export interface DatabaseTutorialSettings {
+  videoUrl: string;
+  thumbnailUrl: string;
+  title: string;
+  description: string;
+  providerRegisterUrl: string;
+  updatedAt?: number;
+}

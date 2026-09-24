@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { api } from '../services/api';
 import { db } from '../services/db';
+import { cloudDatabaseService } from '../services/cloudDatabase';
 import { UserAccount } from '../types';
 
 interface LoginScreenProps {
@@ -85,8 +86,19 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
             durationDays: res.user.subscriptionDays || 30,
             expiresAt: res.user.subscriptionExpiresAt,
             activatedAt: Date.now(),
-            status: 'active'
+            status: 'active',
+            phone: loggedUser.phone
           });
+        } else {
+          // If pending, expired, or frozen
+          db.saveLicense({
+            isValid: false,
+            isExpired: true,
+            durationDays: res.user.subscriptionDays || 0,
+            expiresAt: res.user.subscriptionExpiresAt || 0,
+            status: res.user.subscriptionStatus || 'pending',
+            phone: loggedUser.phone
+          } as any);
         }
       } catch (networkErr: any) {
         // Fallback for Master Admin or local merchant if offline
@@ -119,6 +131,15 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
         owner_name: loggedUser.fullName,
         phone: loggedUser.phone
       });
+
+      // Auto-restore merchant cloud database & business data for cross-device roaming
+      if (loggedUser.phone) {
+        try {
+          await cloudDatabaseService.restoreMerchantDatabaseForDevice(loggedUser.phone);
+        } catch (restoreErr) {
+          console.warn('Could not auto-restore cloud database during login:', restoreErr);
+        }
+      }
 
       onSuccess(loggedUser);
     } catch (err: any) {

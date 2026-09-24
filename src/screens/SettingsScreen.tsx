@@ -10,20 +10,27 @@ import {
   RotateCcw,
   CheckCircle2,
   AlertTriangle,
-  FileSpreadsheet
+  FileSpreadsheet,
+  Cloud,
+  Database,
+  Sparkles,
+  ArrowRight,
+  Zap
 } from 'lucide-react';
 import { db } from '../services/db';
-import { AppSettings } from '../types';
+import { AppSettings, ScreenType } from '../types';
 import { ConfirmModal } from '../components/ConfirmModal';
 
 interface SettingsScreenProps {
   isDarkMode: boolean;
   onToggleTheme: () => void;
+  onNavigate?: (screen: ScreenType) => void;
 }
 
 export const SettingsScreen: React.FC<SettingsScreenProps> = ({
   isDarkMode,
-  onToggleTheme
+  onToggleTheme,
+  onNavigate
 }) => {
   const [settings, setSettings] = useState<AppSettings>(db.getSettings());
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
@@ -195,6 +202,40 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
               />
             </div>
           </div>
+        </div>
+
+        {/* Cloud Database Setup Card */}
+        <div className="bg-gradient-to-r from-emerald-900/10 via-teal-900/10 to-blue-900/10 dark:from-emerald-950/40 dark:via-teal-950/40 dark:to-blue-950/40 p-6 rounded-3xl border border-emerald-200 dark:border-emerald-800/60 shadow-xs flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+          <div className="flex items-center gap-3.5">
+            <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-emerald-600 to-teal-600 text-white flex items-center justify-center shrink-0 shadow-md shadow-emerald-900/20">
+              <Cloud className="w-6 h-6" />
+            </div>
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <h2 className="font-black text-sm text-gray-900 dark:text-white">
+                  ربط السحابة المستقلة للتاجر (BYOD)
+                </h2>
+                <span className="text-[10px] bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 font-bold px-2 py-0.5 rounded-full">
+                  سعة غير محدودة مدى الحياة
+                </span>
+              </div>
+              <p className="text-xs text-gray-500 dark:text-gray-400 max-w-xl leading-relaxed">
+                اربط متجرك بقاعدتك السحابية الخاصة مع مشاهدة فيديو الشرح لنسخ الرابط والمفتاح والاتصال التلقائي بين جميع أجهزتك.
+              </p>
+            </div>
+          </div>
+
+          {onNavigate && (
+            <button
+              type="button"
+              onClick={() => onNavigate('cloud_database_setup')}
+              className="w-full md:w-auto px-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-black text-xs shadow-md shadow-emerald-900/20 flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-95 shrink-0"
+            >
+              <Zap className="w-4 h-4 text-amber-300" />
+              <span>إعداد وربط السحابة</span>
+              <ArrowRight className="w-4 h-4 mr-1" />
+            </button>
+          )}
         </div>
 
         {/* Theme & Display */}
