@@ -10,7 +10,9 @@ import {
   unfreezeMerchantInFirebase,
   deleteMerchantInFirebase,
   updateMerchantPasswordInFirebase,
-  getAdminDataFromFirebase
+  updateMerchantCameraFeatureInFirebase,
+  getAdminDataFromFirebase,
+  subscribeToMerchantStatusInFirebase
 } from './firebase';
 
 export interface ServerTimeResponse {
@@ -56,6 +58,8 @@ export interface AdminMerchantRecord {
   hasActiveLicense?: boolean;
   licenseRemainingMs?: number;
   remainingDays?: number;
+  cameraFeatureEnabled?: boolean;
+  cameraFeatureExpiresAt?: number;
 }
 
 export const api = {
@@ -226,6 +230,11 @@ export const api = {
     }
 
     return { exists: true, status: 'offline_unknown' };
+  },
+
+  // 4.1. Subscribe to Live Firestore Status Updates (Realtime Sync)
+  subscribeToMerchantStatus(phone: string, callback: (status: any) => void) {
+    return subscribeToMerchantStatusInFirebase(phone, callback);
   },
 
   // 5. Admin Panel Login
@@ -441,6 +450,59 @@ export const api = {
     return {
       success: true,
       message: 'تم تحديث كلمة المرور للتاجر بنجاح.'
+    };
+  },
+
+  // 13. Admin Enable / Disable Merchant Mobile Camera Feature
+  async setMerchantCameraFeature(payload: {
+    phone: string;
+    enabled: boolean;
+    durationUnit?: 'minute' | 'minutes' | 'hour' | 'hours' | 'day' | 'days' | 'week' | 'weeks' | 'month' | 'months' | 'year' | 'years';
+    durationValue?: number;
+    isUnlimited?: boolean;
+  }) {
+    const cleanPhone = payload.phone.trim();
+    let expiresAt = 0;
+    const now = Date.now();
+
+    if (payload.enabled) {
+      if (payload.isUnlimited) {
+        expiresAt = now + 100 * 365 * 86400000;
+      } else {
+        const val = Math.max(1, payload.durationValue || 1);
+        let ms = val * 86400000;
+        if (payload.durationUnit === 'minute' || payload.durationUnit === 'minutes') ms = val * 60000;
+        else if (payload.durationUnit === 'hour' || payload.durationUnit === 'hours') ms = val * 3600000;
+        else if (payload.durationUnit === 'day' || payload.durationUnit === 'days') ms = val * 86400000;
+        else if (payload.durationUnit === 'week' || payload.durationUnit === 'weeks') ms = val * 7 * 86400000;
+        else if (payload.durationUnit === 'month' || payload.durationUnit === 'months') ms = val * 30 * 86400000;
+        else if (payload.durationUnit === 'year' || payload.durationUnit === 'years') ms = val * 365 * 86400000;
+        expiresAt = now + ms;
+      }
+    }
+
+    try {
+      await updateMerchantCameraFeatureInFirebase(cleanPhone, payload.enabled, expiresAt);
+    } catch (e) {
+      console.warn('Firebase camera update fallback:', e);
+    }
+
+    try {
+      const res = await fetch('/api/admin/merchants/camera-feature', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      if (res.ok) return await res.json();
+    } catch {
+      // Standalone
+    }
+
+    return {
+      success: true,
+      message: payload.enabled ? 'تم تفعيل ميزة كاميرا الهاتف للتاجر بنجاح.' : 'تم إلغاء تفعيل ميزة كاميرا الهاتف.',
+      cameraFeatureEnabled: payload.enabled,
+      cameraFeatureExpiresAt: expiresAt
     };
   }
 };

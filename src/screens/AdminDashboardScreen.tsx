@@ -38,7 +38,9 @@ import {
   Filter,
   PlusCircle,
   HelpCircle,
-  Video
+  Video,
+  Camera,
+  Crown
 } from 'lucide-react';
 import { api, AdminMerchantRecord } from '../services/api';
 import { ScreenType } from '../types';
@@ -100,6 +102,15 @@ export const AdminDashboardScreen: React.FC<AdminDashboardScreenProps> = ({
     name: string;
     shop: string;
   } | null>(null);
+
+  // Camera Feature Management Modal State
+  const [cameraModalMerchant, setCameraModalMerchant] = useState<AdminMerchantRecord | null>(null);
+  const [cameraDurationUnit, setCameraDurationUnit] = useState<
+    'minute' | 'hour' | 'day' | 'week' | 'month' | 'year'
+  >('day');
+  const [cameraDurationValue, setCameraDurationValue] = useState<number>(30);
+  const [cameraIsUnlimited, setCameraIsUnlimited] = useState<boolean>(false);
+  const [cameraSubmitting, setCameraSubmitting] = useState<boolean>(false);
 
   useEffect(() => {
     fetchData();
@@ -175,6 +186,32 @@ export const AdminDashboardScreen: React.FC<AdminDashboardScreenProps> = ({
       fetchData();
     } catch (err: any) {
       alert(err.message || 'تعذر تغيير حالة الحساب');
+    }
+  };
+
+  const handleCameraFeatureSave = async (enable: boolean) => {
+    if (!cameraModalMerchant) return;
+    setCameraSubmitting(true);
+    try {
+      await api.setMerchantCameraFeature({
+        phone: cameraModalMerchant.phone,
+        enabled: enable,
+        durationUnit: cameraDurationUnit,
+        durationValue: cameraDurationValue,
+        isUnlimited: cameraIsUnlimited
+      });
+
+      showNotice(
+        enable
+          ? `تم تفعيل ميزة كاميرا الهاتف للتاجر "${cameraModalMerchant.fullName}" بنجاح!`
+          : `تم قفل ميزة كاميرا الهاتف للتاجر "${cameraModalMerchant.fullName}".`
+      );
+      setCameraModalMerchant(null);
+      fetchData();
+    } catch (err: any) {
+      alert(err.message || 'حدث خطأ أثناء تعديل ميزة الكاميرا.');
+    } finally {
+      setCameraSubmitting(false);
     }
   };
 
@@ -499,30 +536,47 @@ export const AdminDashboardScreen: React.FC<AdminDashboardScreenProps> = ({
                         </td>
 
                         <td className="py-3.5 px-3">
-                          {isPending && (
-                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-amber-100 dark:bg-amber-950/80 text-amber-800 dark:text-amber-300 font-black text-[11px]">
-                              <Clock className="w-3 h-3" />
-                              <span>بانتظار التفعيل</span>
-                            </span>
-                          )}
-                          {isActive && (
-                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-emerald-100 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-300 font-black text-[11px]">
-                              <CheckCircle2 className="w-3 h-3" />
-                              <span>مفعل ونشط</span>
-                            </span>
-                          )}
-                          {isFrozen && (
-                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-red-100 dark:bg-red-950/80 text-red-800 dark:text-red-300 font-black text-[11px]">
-                              <Lock className="w-3 h-3" />
-                              <span>مجمد وموقوف</span>
-                            </span>
-                          )}
-                          {isExpired && (
-                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-gray-100 dark:bg-zinc-800 text-gray-700 dark:text-gray-300 font-black text-[11px]">
-                              <AlertCircle className="w-3 h-3" />
-                              <span>منتهي الصلاحية</span>
-                            </span>
-                          )}
+                          <div className="space-y-1">
+                            {isPending && (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-amber-100 dark:bg-amber-950/80 text-amber-800 dark:text-amber-300 font-black text-[11px]">
+                                <Clock className="w-3 h-3" />
+                                <span>بانتظار التفعيل</span>
+                              </span>
+                            )}
+                            {isActive && (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-emerald-100 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-300 font-black text-[11px]">
+                                <CheckCircle2 className="w-3 h-3" />
+                                <span>مفعل ونشط</span>
+                              </span>
+                            )}
+                            {isFrozen && (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-red-100 dark:bg-red-950/80 text-red-800 dark:text-red-300 font-black text-[11px]">
+                                <Lock className="w-3 h-3" />
+                                <span>مجمد وموقوف</span>
+                              </span>
+                            )}
+                            {isExpired && (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-gray-100 dark:bg-zinc-800 text-gray-700 dark:text-gray-300 font-black text-[11px]">
+                                <AlertCircle className="w-3 h-3" />
+                                <span>منتهي الصلاحية</span>
+                              </span>
+                            )}
+
+                            {/* Camera Feature Status Pill */}
+                            <div>
+                              {merchant.cameraFeatureEnabled && (!merchant.cameraFeatureExpiresAt || merchant.cameraFeatureExpiresAt === 0 || merchant.cameraFeatureExpiresAt > serverTime) ? (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 text-[10px] font-black border border-emerald-200 dark:border-emerald-800">
+                                  <Camera className="w-3 h-3" />
+                                  <span>كاميرا الكاشير: مفعلة</span>
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-gray-100 dark:bg-zinc-800 text-gray-500 text-[10px] font-bold">
+                                  <Crown className="w-3 h-3 text-amber-500" />
+                                  <span>كاميرا الكاشير: مقفولة</span>
+                                </span>
+                              )}
+                            </div>
+                          </div>
                         </td>
 
                         <td className="py-3.5 px-3">
@@ -598,6 +652,28 @@ export const AdminDashboardScreen: React.FC<AdminDashboardScreenProps> = ({
                             >
                               <MessageSquare className="w-3.5 h-3.5" />
                             </a>
+
+                            {/* Camera Feature Control Button */}
+                            <button
+                              onClick={() => {
+                                setCameraModalMerchant(merchant);
+                                setCameraDurationUnit('day');
+                                setCameraDurationValue(30);
+                                setCameraIsUnlimited(false);
+                              }}
+                              className={`p-1.5 rounded-xl border transition-colors cursor-pointer ${
+                                merchant.cameraFeatureEnabled && (!merchant.cameraFeatureExpiresAt || merchant.cameraFeatureExpiresAt === 0 || merchant.cameraFeatureExpiresAt > serverTime)
+                                  ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border-emerald-300 dark:border-emerald-800'
+                                  : 'bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800 hover:bg-amber-100'
+                              }`}
+                              title={
+                                merchant.cameraFeatureEnabled && (!merchant.cameraFeatureExpiresAt || merchant.cameraFeatureExpiresAt === 0 || merchant.cameraFeatureExpiresAt > serverTime)
+                                  ? 'إدارة ميزة كاميرا الهاتف (مفعلة حالياً)'
+                                  : 'فتح وتفعيل ميزة كاميرا الهاتف'
+                              }
+                            >
+                              <Camera className="w-3.5 h-3.5" />
+                            </button>
 
                             {/* Freeze / Unfreeze Toggle */}
                             <button
@@ -1013,6 +1089,169 @@ export const AdminDashboardScreen: React.FC<AdminDashboardScreenProps> = ({
               >
                 إلغاء
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Camera Feature Management Modal (From 1 Minute to Infinity) */}
+      {cameraModalMerchant && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fadeIn" dir="rtl">
+          <div className="bg-white dark:bg-[#1E1E1E] rounded-3xl p-6 md:p-8 max-w-md w-full shadow-2xl border border-amber-200 dark:border-amber-900/60 space-y-5">
+            <div className="flex items-center justify-between border-b border-gray-100 dark:border-zinc-800 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-2xl bg-amber-500 text-white flex items-center justify-center">
+                  <Camera className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-gray-900 dark:text-white">
+                    إدارة ميزة كاميرا الهاتف اللاسلكية
+                  </h3>
+                  <p className="text-xs text-gray-500">
+                    التاجر: {cameraModalMerchant.fullName} ({cameraModalMerchant.shopName})
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setCameraModalMerchant(null)}
+                className="p-1 text-gray-400 hover:text-gray-600 dark:hover:text-white rounded-lg cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Current Status Badge */}
+            <div className="p-3 rounded-2xl bg-gray-50 dark:bg-zinc-900 border border-gray-100 dark:border-zinc-800 flex items-center justify-between text-xs">
+              <span className="text-gray-500">الحالة الراهنة للميزة:</span>
+              {cameraModalMerchant.cameraFeatureEnabled && (!cameraModalMerchant.cameraFeatureExpiresAt || cameraModalMerchant.cameraFeatureExpiresAt === 0 || cameraModalMerchant.cameraFeatureExpiresAt > serverTime) ? (
+                <span className="font-black text-emerald-600 flex items-center gap-1">
+                  <CheckCircle2 className="w-4 h-4" />
+                  <span>
+                    {!cameraModalMerchant.cameraFeatureExpiresAt || cameraModalMerchant.cameraFeatureExpiresAt > Date.now() + 50 * 365 * 86400000
+                      ? 'مفعلة (مدى الحياة - غير محدود)'
+                      : `مفعلة حتى ${new Date(cameraModalMerchant.cameraFeatureExpiresAt).toLocaleString('ar-EG')}`}
+                  </span>
+                </span>
+              ) : (
+                <span className="font-bold text-amber-600 flex items-center gap-1">
+                  <Lock className="w-3.5 h-3.5" />
+                  <span>مقفولة (تظهر له نافذة ترقية وواتساب)</span>
+                </span>
+              )}
+            </div>
+
+            {/* Fast Presets from 1 Minute to Infinity */}
+            <div className="space-y-2">
+              <label className="text-xs font-bold text-gray-700 dark:text-gray-300 block">
+                تحديد مدة تفعيل الميزة بدقة (من دقيقة إلى ما لا نهاية):
+              </label>
+
+              <div className="grid grid-cols-3 gap-2">
+                {[
+                  { label: '♾️ ما لا نهاية', unit: 'year' as const, val: 100, isInf: true },
+                  { label: '1 دقيقة (تجربة)', unit: 'minute' as const, val: 1, isInf: false },
+                  { label: '1 ساعة', unit: 'hour' as const, val: 1, isInf: false },
+                  { label: '1 يوم', unit: 'day' as const, val: 1, isInf: false },
+                  { label: '2 يوم', unit: 'day' as const, val: 2, isInf: false },
+                  { label: 'أسبوع (7 أيام)', unit: 'week' as const, val: 1, isInf: false },
+                  { label: 'شهر (30 يوم)', unit: 'month' as const, val: 1, isInf: false },
+                  { label: 'سنة (365 يوم)', unit: 'year' as const, val: 1, isInf: false },
+                  { label: 'سنتين', unit: 'year' as const, val: 2, isInf: false },
+                  { label: '3 سنوات', unit: 'year' as const, val: 3, isInf: false }
+                ].map(p => (
+                  <button
+                    key={p.label}
+                    type="button"
+                    onClick={() => {
+                      setCameraIsUnlimited(p.isInf);
+                      setCameraDurationUnit(p.unit);
+                      setCameraDurationValue(p.val);
+                    }}
+                    className={`p-2 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
+                      p.isInf && cameraIsUnlimited
+                        ? 'bg-amber-500 text-white border-amber-500 shadow-xs'
+                        : !cameraIsUnlimited && cameraDurationUnit === p.unit && cameraDurationValue === p.val
+                        ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
+                        : 'bg-gray-50 dark:bg-zinc-800 border-gray-200 dark:border-zinc-700 text-gray-700 dark:text-gray-300 hover:bg-gray-100'
+                    }`}
+                  >
+                    {p.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Custom Precise Counter Controls */}
+            {!cameraIsUnlimited && (
+              <div className="space-y-1.5 pt-1">
+                <label className="text-xs font-bold text-gray-700 dark:text-gray-300 block">
+                  أو اكتب القيمة والوحدة المخصصة:
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <input
+                    type="number"
+                    min="1"
+                    value={cameraDurationValue}
+                    onChange={e => setCameraDurationValue(Math.max(1, Number(e.target.value) || 1))}
+                    className="w-full px-3 py-2 rounded-xl border border-gray-200 dark:border-zinc-700 bg-gray-50 dark:bg-zinc-900 text-xs font-black text-emerald-600 text-center"
+                    placeholder="العدد"
+                  />
+                  <select
+                    value={cameraDurationUnit}
+                    onChange={e => setCameraDurationUnit(e.target.value as any)}
+                    className="w-full px-3 py-2 rounded-xl border border-gray-200 dark:border-zinc-700 bg-gray-50 dark:bg-zinc-900 text-xs font-bold"
+                  >
+                    <option value="minute">دقيقة / دقائق</option>
+                    <option value="hour">ساعة / ساعات</option>
+                    <option value="day">يوم / أيام</option>
+                    <option value="week">أسبوع / أسابيع</option>
+                    <option value="month">شهر / شهور</option>
+                    <option value="year">سنة / سنوات</option>
+                  </select>
+                </div>
+              </div>
+            )}
+
+            {/* Action Buttons */}
+            <div className="pt-2 space-y-2">
+              <button
+                type="button"
+                onClick={() => handleCameraFeatureSave(true)}
+                disabled={cameraSubmitting}
+                className="w-full py-3 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-black text-xs shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer"
+              >
+                <Check className="w-4 h-4" />
+                <span>
+                  {cameraSubmitting
+                    ? 'جاري الحفظ...'
+                    : cameraIsUnlimited
+                    ? 'فتح الميزة للتاجر مدى الحياة (ما لا نهاية)'
+                    : `فتح وتفعيل الميزة لمدة (${cameraDurationValue} ${
+                        cameraDurationUnit === 'minute'
+                          ? 'دقيقة'
+                          : cameraDurationUnit === 'hour'
+                          ? 'ساعة'
+                          : cameraDurationUnit === 'day'
+                          ? 'يوم'
+                          : cameraDurationUnit === 'week'
+                          ? 'أسبوع'
+                          : cameraDurationUnit === 'month'
+                          ? 'شهر'
+                          : 'سنة'
+                      })`}
+                </span>
+              </button>
+
+              {cameraModalMerchant.cameraFeatureEnabled && (
+                <button
+                  type="button"
+                  onClick={() => handleCameraFeatureSave(false)}
+                  disabled={cameraSubmitting}
+                  className="w-full py-2.5 px-4 rounded-xl bg-red-50 dark:bg-red-950/40 text-red-600 dark:text-red-300 border border-red-200 dark:border-red-900/60 hover:bg-red-100 font-bold text-xs transition-colors cursor-pointer"
+                >
+                  إعادة قفل الميزة على هذا التاجر (تظهر له رسالة الترقية)
+                </button>
+              )}
             </div>
           </div>
         </div>

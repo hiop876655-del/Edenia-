@@ -31,6 +31,8 @@ import { AccountScreen } from './screens/AccountScreen';
 import { UpdatesScreen } from './screens/UpdatesScreen';
 import { AdminDashboardScreen } from './screens/AdminDashboardScreen';
 import { CloudDatabaseSetupScreen } from './screens/CloudDatabaseSetupScreen';
+import { CashierCameraScreen } from './screens/CashierCameraScreen';
+import { CameraUpgradeModal } from './components/CameraUpgradeModal';
 import { cloudDatabaseService } from './services/cloudDatabase';
 
 export function App() {
@@ -45,6 +47,7 @@ export function App() {
   // Modals
   const [viewingReceiptSale, setViewingReceiptSale] = useState<Sale | null>(null);
   const [isMobileMoreOpen, setIsMobileMoreOpen] = useState(false);
+  const [isCameraUpgradeModalOpen, setIsCameraUpgradeModalOpen] = useState(false);
 
   // Desktop Native POS Keyboard Shortcuts (F1 - F7)
   useEffect(() => {
@@ -129,8 +132,11 @@ export function App() {
 
     // Live Cloud Status Verification (Locks immediately if admin froze/expired or deleted merchant)
     const syncCloudStatus = async () => {
+      if (!user?.phone || user.role === 'admin') return;
       try {
-        const statusRes = await api.checkMerchantStatus(user.phone);
+        const statusRes: any = await api.checkMerchantStatus(user.phone);
+        if (!statusRes) return;
+
         if (statusRes.exists === false || statusRes.status === 'deleted') {
           // Merchant deleted by admin -> Logout and lock immediately
           db.saveUser({ ...user, isLoggedIn: false });
@@ -169,6 +175,30 @@ export function App() {
             setLicense(updatedLicense);
           }
         }
+
+        // Sync camera feature state in real-time
+        if (typeof statusRes.cameraFeatureEnabled !== 'undefined') {
+          const isCamActive = Boolean(
+            statusRes.cameraFeatureEnabled &&
+            (!statusRes.cameraFeatureExpiresAt || statusRes.cameraFeatureExpiresAt === 0 || statusRes.cameraFeatureExpiresAt > Date.now())
+          );
+          setUser(prevUser => {
+            if (!prevUser) return null;
+            if (
+              prevUser.cameraFeatureEnabled !== isCamActive ||
+              prevUser.cameraFeatureExpiresAt !== statusRes.cameraFeatureExpiresAt
+            ) {
+              const updatedUser = {
+                ...prevUser,
+                cameraFeatureEnabled: isCamActive,
+                cameraFeatureExpiresAt: statusRes.cameraFeatureExpiresAt || 0
+              };
+              db.saveUser(updatedUser);
+              return updatedUser;
+            }
+            return prevUser;
+          });
+        }
       } catch (err) {
         // Offline -> App continues to work locally based on secure local anchor time
       }
@@ -178,19 +208,84 @@ export function App() {
     localCheck();
     syncCloudStatus();
 
+    // Attach real-time cloud listener for instant push updates
+    let unsubscribeRealtime = () => {};
+    if (user?.phone) {
+      try {
+        unsubscribeRealtime = api.subscribeToMerchantStatus(user.phone, (statusRes: any) => {
+          if (!statusRes) return;
+          if (statusRes.exists === false || statusRes.status === 'deleted') {
+            db.saveUser({ ...user, isLoggedIn: false });
+            db.saveLicense({ ...(license || {}), isValid: false, isExpired: true, durationDays: 0, expiresAt: 0 } as any);
+            setUser(null);
+            setLicense(null);
+            setCurrentScreen('home');
+            return;
+          }
+          if (statusRes.status === 'frozen') {
+            db.saveLicense({ ...(license || {}), isValid: false, isExpired: true, status: 'frozen' } as any);
+            setCurrentScreen('activation');
+            return;
+          }
+          if (statusRes.status === 'expired') {
+            db.saveLicense({ ...(license || {}), isValid: false, isExpired: true } as any);
+            setCurrentScreen('expired');
+            return;
+          }
+          if (statusRes.status === 'active' && statusRes.subscriptionExpiresAt > Date.now()) {
+            if (license && license.expiresAt !== statusRes.subscriptionExpiresAt) {
+              const updatedLicense: LicenseState = {
+                ...license,
+                expiresAt: statusRes.subscriptionExpiresAt,
+                durationDays: statusRes.subscriptionDays || license.durationDays,
+                isValid: true,
+                isExpired: false
+              };
+              db.saveLicense(updatedLicense);
+              setLicense(updatedLicense);
+            }
+          }
+          if (typeof statusRes.cameraFeatureEnabled !== 'undefined') {
+            const isCamActive = Boolean(
+              statusRes.cameraFeatureEnabled &&
+              (!statusRes.cameraFeatureExpiresAt || statusRes.cameraFeatureExpiresAt === 0 || statusRes.cameraFeatureExpiresAt > Date.now())
+            );
+            setUser(prevUser => {
+              if (!prevUser) return null;
+              if (
+                prevUser.cameraFeatureEnabled !== isCamActive ||
+                prevUser.cameraFeatureExpiresAt !== statusRes.cameraFeatureExpiresAt
+              ) {
+                const updatedUser = {
+                  ...prevUser,
+                  cameraFeatureEnabled: isCamActive,
+                  cameraFeatureExpiresAt: statusRes.cameraFeatureExpiresAt || 0
+                };
+                db.saveUser(updatedUser);
+                return updatedUser;
+              }
+              return prevUser;
+            });
+          }
+        });
+      } catch (err) {
+        console.warn('Realtime subscription fallback:', err);
+      }
+    }
+
     // Sync merchant business data to cloud
     const syncMerchantData = () => {
-      if (user?.phone && user.role !== 'admin') {
+      if (user?.phone) {
         cloudDatabaseService.syncAllDataToCloud().catch(console.warn);
       }
     };
     syncMerchantData();
 
-    // Run periodic cloud check every 20 seconds
+    // Run periodic cloud check every 10 seconds as backup
     const interval = setInterval(() => {
       localCheck();
       syncCloudStatus();
-    }, 20000);
+    }, 10000);
 
     // Sync business data every 60 seconds
     const dataSyncInterval = setInterval(syncMerchantData, 60000);
@@ -203,6 +298,7 @@ export function App() {
     window.addEventListener('online', handleOnline);
 
     return () => {
+      unsubscribeRealtime();
       clearInterval(interval);
       clearInterval(dataSyncInterval);
       window.removeEventListener('online', handleOnline);
@@ -502,6 +598,15 @@ export function App() {
           />
         );
 
+      case 'cashier_camera':
+        return (
+          <CashierCameraScreen
+            onBack={() => setCurrentScreen('dashboard')}
+            user={user}
+            onUpgradeRequest={() => setIsCameraUpgradeModalOpen(true)}
+          />
+        );
+
       default:
         return (
           <DashboardScreen
@@ -546,6 +651,8 @@ export function App() {
             <Sidebar
               currentScreen={currentScreen}
               onNavigate={setCurrentScreen}
+              user={user}
+              onOpenUpgradeModal={() => setIsCameraUpgradeModalOpen(true)}
             />
           </div>
         )}
@@ -582,6 +689,14 @@ export function App() {
         isDarkMode={isDarkMode}
         onToggleTheme={toggleTheme}
         onLogout={handleLogout}
+        user={user}
+        onOpenUpgradeModal={() => setIsCameraUpgradeModalOpen(true)}
+      />
+
+      <CameraUpgradeModal
+        isOpen={isCameraUpgradeModalOpen}
+        onClose={() => setIsCameraUpgradeModalOpen(false)}
+        user={user}
       />
     </div>
   );

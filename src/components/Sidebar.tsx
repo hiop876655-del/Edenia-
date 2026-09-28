@@ -14,19 +14,31 @@ import {
   PlusCircle,
   HardDrive,
   Sparkles,
-  Cloud
+  Cloud,
+  Camera,
+  Crown
 } from 'lucide-react';
-import { ScreenType } from '../types';
+import { ScreenType, UserAccount } from '../types';
 
 interface SidebarProps {
   currentScreen: ScreenType;
   onNavigate: (screen: ScreenType) => void;
+  user?: UserAccount | null;
+  onOpenUpgradeModal?: () => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
   currentScreen,
-  onNavigate
+  onNavigate,
+  user,
+  onOpenUpgradeModal = () => {}
 }) => {
+  const isCameraFeatureActive = Boolean(
+    user?.role === 'admin' ||
+    user?.phone === '01121097822' ||
+    (user?.cameraFeatureEnabled && (!user?.cameraFeatureExpiresAt || user.cameraFeatureExpiresAt === 0 || user.cameraFeatureExpiresAt > Date.now()))
+  );
+
   const menuItems = [
     {
       id: 'dashboard' as ScreenType,
@@ -40,6 +52,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
       icon: ShoppingCart,
       shortcut: 'F2',
       highlight: true
+    },
+    {
+      id: 'cashier_camera' as ScreenType,
+      label: 'كاميرا الكاشير المحمولة',
+      icon: Camera,
+      isSpecialCamera: true,
+      hasCrown: !isCameraFeatureActive,
+      highlight: isCameraFeatureActive
     },
     {
       id: 'inventory' as ScreenType,
@@ -122,23 +142,38 @@ export const Sidebar: React.FC<SidebarProps> = ({
           const Icon = item.icon;
           const isActive = currentScreen === item.id;
 
+          const handleClick = () => {
+            if (item.isSpecialCamera && item.hasCrown) {
+              onOpenUpgradeModal();
+            } else {
+              onNavigate(item.id);
+            }
+          };
+
           return (
             <button
               key={item.id}
-              onClick={() => onNavigate(item.id)}
+              onClick={handleClick}
               className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold transition-all duration-150 cursor-pointer ${
                 isActive
                   ? 'bg-[#2E7D32] text-white shadow-xs font-bold'
+                  : item.isSpecialCamera && item.hasCrown
+                  ? 'bg-amber-50/70 dark:bg-amber-950/30 text-amber-800 dark:text-amber-300 hover:bg-amber-100/80 border border-amber-200/60 dark:border-amber-900/50'
                   : item.highlight
                   ? 'bg-emerald-50 dark:bg-emerald-950/40 text-[#2E7D32] dark:text-[#66BB6A] hover:bg-emerald-100 dark:hover:bg-emerald-900/40'
                   : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-zinc-800/80'
               }`}
             >
               <div className="flex items-center gap-2.5">
-                <Icon className={`w-4 h-4 shrink-0 ${isActive ? 'text-white' : 'text-gray-500 dark:text-gray-400'}`} />
+                <Icon className={`w-4 h-4 shrink-0 ${isActive ? 'text-white' : item.isSpecialCamera && item.hasCrown ? 'text-amber-500' : 'text-gray-500 dark:text-gray-400'}`} />
                 <span>{item.label}</span>
               </div>
-              {item.shortcut && (
+              
+              {item.hasCrown ? (
+                <span className="flex items-center gap-1 text-[10px] font-black text-amber-600 dark:text-amber-400 bg-amber-100 dark:bg-amber-950 px-1.5 py-0.5 rounded-md border border-amber-300 dark:border-amber-800" title="ميزة مقفولة - اضغط للترقية">
+                  <Crown className="w-3.5 h-3.5 fill-amber-500 text-amber-500" />
+                </span>
+              ) : item.shortcut ? (
                 <span
                   className={`text-[9px] px-1 py-0.5 rounded font-mono ${
                     isActive
@@ -148,7 +183,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 >
                   {item.shortcut}
                 </span>
-              )}
+              ) : null}
             </button>
           );
         })}

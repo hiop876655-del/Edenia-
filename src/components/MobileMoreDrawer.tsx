@@ -12,9 +12,11 @@ import {
   LogOut,
   Home,
   Sparkles,
-  Cloud
+  Cloud,
+  Camera,
+  Crown
 } from 'lucide-react';
-import { ScreenType } from '../types';
+import { ScreenType, UserAccount } from '../types';
 
 interface MobileMoreDrawerProps {
   isOpen: boolean;
@@ -23,6 +25,8 @@ interface MobileMoreDrawerProps {
   isDarkMode: boolean;
   onToggleTheme: () => void;
   onLogout: () => void;
+  user?: UserAccount | null;
+  onOpenUpgradeModal?: () => void;
 }
 
 export const MobileMoreDrawer: React.FC<MobileMoreDrawerProps> = ({
@@ -31,13 +35,29 @@ export const MobileMoreDrawer: React.FC<MobileMoreDrawerProps> = ({
   onNavigate,
   isDarkMode,
   onToggleTheme,
-  onLogout
+  onLogout,
+  user,
+  onOpenUpgradeModal = () => {}
 }) => {
   if (!isOpen) return null;
+
+  const isCameraFeatureActive = Boolean(
+    user?.role === 'admin' ||
+    user?.phone === '01121097822' ||
+    (user?.cameraFeatureEnabled && (!user?.cameraFeatureExpiresAt || user.cameraFeatureExpiresAt === 0 || user.cameraFeatureExpiresAt > Date.now()))
+  );
 
   const handleNav = (screen: ScreenType) => {
     onNavigate(screen);
     onClose();
+  };
+
+  const handleCameraClick = () => {
+    if (!isCameraFeatureActive) {
+      onOpenUpgradeModal();
+    } else {
+      handleNav('cashier_camera');
+    }
   };
 
   return (
@@ -60,6 +80,23 @@ export const MobileMoreDrawer: React.FC<MobileMoreDrawerProps> = ({
           >
             <Home className="w-4 h-4 text-[#2E7D32]" />
             <span>الصفحة الرئيسية</span>
+          </button>
+
+          <button
+            onClick={handleCameraClick}
+            className={`flex items-center justify-between p-3 rounded-2xl font-bold transition-all cursor-pointer ${
+              isCameraFeatureActive
+                ? 'bg-emerald-50 dark:bg-emerald-950/50 text-[#2E7D32] dark:text-[#66BB6A] border border-emerald-200 dark:border-emerald-800/60'
+                : 'bg-amber-50 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800/60'
+            }`}
+          >
+            <div className="flex items-center gap-2.5">
+              <Camera className="w-4 h-4" />
+              <span>كاميرا الكاشير</span>
+            </div>
+            {!isCameraFeatureActive && (
+              <Crown className="w-3.5 h-3.5 fill-amber-500 text-amber-500 shrink-0" />
+            )}
           </button>
 
           <button

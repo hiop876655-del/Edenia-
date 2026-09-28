@@ -16,13 +16,10 @@ import {
   RotateCcw,
   History,
   QrCode,
-  Package,
-  Camera,
-  Smartphone
+  Package
 } from 'lucide-react';
 import { db } from '../services/db';
 import { Product, Customer, Sale, SaleItem, AppSettings } from '../types';
-import { MobileScannerModal } from '../components/MobileScannerModal';
 
 interface SalesScreenProps {
   onShowReceipt: (sale: Sale) => void;
@@ -48,7 +45,6 @@ export const SalesScreen: React.FC<SalesScreenProps> = ({ onShowReceipt }) => {
   const [activeTab, setActiveTab] = useState<'pos' | 'history'>('pos');
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [isScannerOpen, setIsScannerOpen] = useState(false);
 
   const loadData = () => {
     setProducts(db.getProducts());
@@ -60,6 +56,22 @@ export const SalesScreen: React.FC<SalesScreenProps> = ({ onShowReceipt }) => {
   useEffect(() => {
     loadData();
   }, []);
+
+  // Listen for barcode scan events from external scanners, camera cashier screen, or other tabs
+  useEffect(() => {
+    const handleStorage = (e: StorageEvent) => {
+      if (e.key === 'idenia_last_scanned_barcode_event' && e.newValue) {
+        try {
+          const parsed = JSON.parse(e.newValue);
+          if (parsed && parsed.barcode && parsed.mode === 'sale') {
+            handleBarcodeDetected(parsed.barcode);
+          }
+        } catch {}
+      }
+    };
+    window.addEventListener('storage', handleStorage);
+    return () => window.removeEventListener('storage', handleStorage);
+  }, [products]);
 
   // Audio Beep
   const playBeep = () => {
@@ -84,12 +96,24 @@ export const SalesScreen: React.FC<SalesScreenProps> = ({ onShowReceipt }) => {
   const total = Math.max(0, subtotal - (Number(discount) || 0));
   const remaining = Math.max(0, total - (Number(paidAmount) || 0));
 
-  // Auto-set paid amount to total when cash payment
+  // Payment type switch handlers:
+  // When cash: auto-set paid amount to total invoice
+  // When debt: auto-set paid amount (downpayment) to 0!
+  const handleSelectPaymentType = (type: 'cash' | 'debt') => {
+    setPaymentType(type);
+    if (type === 'cash') {
+      setPaidAmount(total);
+    } else {
+      setPaidAmount(0); // For debt: downpayment starts at 0!
+    }
+  };
+
+  // Keep cash paid amount in sync with total when total changes in cash mode
   useEffect(() => {
     if (paymentType === 'cash') {
       setPaidAmount(total);
     }
-  }, [total, paymentType]);
+  }, [total]);
 
   const addToCart = (product: Product, playAudio = false) => {
     if (product.quantity <= 0) {
@@ -338,15 +362,6 @@ export const SalesScreen: React.FC<SalesScreenProps> = ({ onShowReceipt }) => {
                   مسح
                 </button>
               )}
-              <button
-                type="button"
-                onClick={() => setIsScannerOpen(true)}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-300 dark:border-emerald-800 text-[#2E7D32] dark:text-emerald-400 font-bold text-xs rounded-xl hover:bg-emerald-100 dark:hover:bg-emerald-900/60 cursor-pointer shrink-0 transition-colors shadow-2xs"
-                title="قارئ الباركود عبر كاميرا الموبايل أو الكمبيوتر"
-              >
-                <Camera className="w-4 h-4" />
-                <span className="hidden sm:inline">كاميرا الموبايل</span>
-              </button>
             </div>
 
             {/* Products Quick Grid */}
@@ -532,7 +547,7 @@ export const SalesScreen: React.FC<SalesScreenProps> = ({ onShowReceipt }) => {
                 <div className="grid grid-cols-2 gap-2">
                   <button
                     type="button"
-                    onClick={() => setPaymentType('cash')}
+                    onClick={() => handleSelectPaymentType('cash')}
                     className={`py-2 text-xs font-bold rounded-xl border transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
                       paymentType === 'cash'
                         ? 'bg-[#2E7D32] text-white border-[#2E7D32]'
@@ -545,7 +560,7 @@ export const SalesScreen: React.FC<SalesScreenProps> = ({ onShowReceipt }) => {
 
                   <button
                     type="button"
-                    onClick={() => setPaymentType('debt')}
+                    onClick={() => handleSelectPaymentType('debt')}
                     className={`py-2 text-xs font-bold rounded-xl border transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
                       paymentType === 'debt'
                         ? 'bg-amber-600 text-white border-amber-600'
@@ -580,7 +595,7 @@ export const SalesScreen: React.FC<SalesScreenProps> = ({ onShowReceipt }) => {
                     type="number"
                     min="0"
                     step="any"
-                    value={paidAmount || ''}
+                    value={paidAmount}
                     onChange={e => setPaidAmount(Number(e.target.value))}
                     className="w-full px-2.5 py-1.5 text-xs rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-zinc-900 text-gray-900 dark:text-white font-bold text-[#2E7D32]"
                   />
@@ -604,10 +619,24 @@ export const SalesScreen: React.FC<SalesScreenProps> = ({ onShowReceipt }) => {
                   <span className="text-[#2E7D32] dark:text-[#66BB6A]">{total.toFixed(2)} {settings.currency_symbol}</span>
                 </div>
                 {paymentType === 'debt' && (
-                  <div className="flex justify-between text-xs font-bold text-amber-600 border-t border-gray-200 dark:border-gray-800 pt-1">
-                    <span>المتبقي الآجل للدين:</span>
-                    <span>{remaining.toFixed(2)} {settings.currency_symbol}</span>
-                  </div>
+                  <>
+                    {paidAmount < total ? (
+                      <div className="flex justify-between text-xs font-bold text-amber-600 border-t border-gray-200 dark:border-gray-800 pt-1">
+                        <span>المتبقي الآجل للدين:</span>
+                        <span>{remaining.toFixed(2)} {settings.currency_symbol}</span>
+                      </div>
+                    ) : paidAmount > total ? (
+                      <div className="flex justify-between text-xs font-bold text-emerald-600 border-t border-gray-200 dark:border-gray-800 pt-1">
+                        <span>سداد لحساب قديم (فائض):</span>
+                        <span>- {(paidAmount - total).toFixed(2)} {settings.currency_symbol}</span>
+                      </div>
+                    ) : (
+                      <div className="flex justify-between text-xs font-bold text-emerald-600 border-t border-gray-200 dark:border-gray-800 pt-1">
+                        <span>مسدد بالكامل:</span>
+                        <span>0.00 {settings.currency_symbol}</span>
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
 
@@ -713,13 +742,6 @@ export const SalesScreen: React.FC<SalesScreenProps> = ({ onShowReceipt }) => {
           </div>
         </div>
       )}
-
-      {/* Wireless Mobile Barcode Scanner Modal */}
-      <MobileScannerModal
-        isOpen={isScannerOpen}
-        onClose={() => setIsScannerOpen(false)}
-        onBarcodeDetected={handleBarcodeDetected}
-      />
     </div>
   );
 };

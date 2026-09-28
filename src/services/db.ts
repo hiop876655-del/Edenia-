@@ -341,7 +341,7 @@ class LocalDatabase {
       }
     }
 
-    if (isCredit && remainingAmount > 0) {
+    if (isCredit) {
       if (!finalCustomerId) {
         const newCust = this.saveCustomer({
           name: trimmedCustomerName || 'عميل آجل',
@@ -350,14 +350,30 @@ class LocalDatabase {
         finalCustomerId = newCust.id;
       }
 
-      this.addDebt({
-        customer_id: finalCustomerId,
-        customer_name: trimmedCustomerName || 'عميل آجل',
-        sale_id: saleId,
-        amount: total,
-        paid_amount: paidAmount,
-        notes: `متبقي من فاتورة ${invoiceNumber}`
-      });
+      const debtCustName = trimmedCustomerName || 'عميل آجل';
+
+      if (remainingAmount > 0) {
+        // Customer paid less than total -> add remaining debt
+        // Example: total 110, paid 50 -> remaining 60 goes to debt
+        this.addDebt({
+          customer_id: finalCustomerId,
+          customer_name: debtCustName,
+          sale_id: saleId,
+          amount: total,
+          paid_amount: paidAmount,
+          notes: `متبقي من فاتورة ${invoiceNumber}`
+        });
+      } else if (paidAmount > total) {
+        // Customer paid more than invoice total (e.g. invoice total 110, paid 210)
+        // 110 settles current invoice in full, excess 100 pays down previous customer debt!
+        const excessPaid = paidAmount - total;
+        this.recordDebtPayment({
+          customer_id: finalCustomerId,
+          customer_name: debtCustName,
+          amount: excessPaid,
+          notes: `سداد من فائض فاتورة ${invoiceNumber} (مقدم ${paidAmount} - فاتورة ${total})`
+        });
+      }
     }
 
     const newSale: Sale = {

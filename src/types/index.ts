@@ -48,6 +48,8 @@ export interface UserAccount {
   subscriptionExpiresAt?: number;
   subscriptionActivatedAt?: number;
   cloudDbConfig?: MerchantCloudConfig;
+  cameraFeatureEnabled?: boolean;
+  cameraFeatureExpiresAt?: number;
 }
 
 export interface Sale {
@@ -173,6 +175,8 @@ export interface RegisteredMerchant {
   subscriptionExpiresAt: number;
   subscriptionActivatedAt?: number;
   notes?: string;
+  cameraFeatureEnabled?: boolean;
+  cameraFeatureExpiresAt?: number;
 }
 
 export interface DashboardStats {
@@ -207,7 +211,8 @@ export type ScreenType =
   | 'expired'
   | 'admin'
   | 'admin_dashboard'
-  | 'cloud_database_setup';
+  | 'cloud_database_setup'
+  | 'cashier_camera';
 
 export interface MerchantCloudConfig {
   provider: 'supabase' | 'custom' | 'firebase';

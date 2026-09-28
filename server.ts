@@ -44,6 +44,8 @@ export interface UserRecord {
   subscriptionExpiresAt: number;
   subscriptionActivatedAt?: number;
   notes?: string;
+  cameraFeatureEnabled?: boolean;
+  cameraFeatureExpiresAt?: number;
   updatedAt?: number;
 }
 
@@ -63,7 +65,9 @@ function loadStore(): SystemStore {
           ...u,
           subscriptionStatus: u.subscriptionStatus || (u.licenseExpiresAt && u.licenseExpiresAt > Date.now() ? 'active' : 'pending'),
           subscriptionDays: u.subscriptionDays || 30,
-          subscriptionExpiresAt: u.subscriptionExpiresAt || u.licenseExpiresAt || 0
+          subscriptionExpiresAt: u.subscriptionExpiresAt || u.licenseExpiresAt || 0,
+          cameraFeatureEnabled: u.cameraFeatureEnabled ?? false,
+          cameraFeatureExpiresAt: u.cameraFeatureExpiresAt ?? 0
         }));
         return parsed;
       }
@@ -242,6 +246,8 @@ app.post("/api/login", (req, res) => {
       subscriptionDays: user.subscriptionDays,
       subscriptionExpiresAt: user.subscriptionExpiresAt,
       remainingDays,
+      cameraFeatureEnabled: user.cameraFeatureEnabled ?? false,
+      cameraFeatureExpiresAt: user.cameraFeatureExpiresAt ?? 0,
       role: "merchant",
       isLoggedIn: true
     }
@@ -265,6 +271,8 @@ app.post("/api/merchant/status", (req, res) => {
       status: "active",
       subscriptionExpiresAt: Date.now() + 100 * 365 * 86400000,
       remainingDays: 9999,
+      cameraFeatureEnabled: true,
+      cameraFeatureExpiresAt: Date.now() + 100 * 365 * 86400000,
       serverTime: Date.now()
     });
   }
@@ -294,6 +302,8 @@ app.post("/api/merchant/status", (req, res) => {
 
   const remainingMs = Math.max(0, user.subscriptionExpiresAt - now);
 
+  const isCameraActive = !!(user.cameraFeatureEnabled && user.cameraFeatureExpiresAt && user.cameraFeatureExpiresAt > now);
+
   res.json({
     success: true,
     exists: true,
@@ -303,6 +313,8 @@ app.post("/api/merchant/status", (req, res) => {
     subscriptionActivatedAt: user.subscriptionActivatedAt,
     remainingDays,
     remainingMs,
+    cameraFeatureEnabled: isCameraActive,
+    cameraFeatureExpiresAt: user.cameraFeatureExpiresAt || 0,
     serverTime: now
   });
 });
@@ -523,6 +535,73 @@ app.post("/api/admin/merchants/update-password", (req, res) => {
   res.json({
     success: true,
     message: `تم تحديث كلمة المرور للتاجر (${user.fullName}) بنجاح.`
+  });
+});
+
+// Admin Activate or Deactivate Camera Feature for Merchant (By Minutes or Days)
+app.post("/api/admin/merchants/camera-feature", (req, res) => {
+  const { phone, enabled, durationUnit, durationValue, isUnlimited } = req.body;
+
+  if (!phone) {
+    return res.status(400).json({ success: false, message: "رقم هاتف التاجر مطلوب" });
+  }
+
+  const cleanPhone = String(phone).trim();
+  const user = systemStore.users.find(u => u.phone === cleanPhone);
+
+  if (!user) {
+    return res.status(404).json({ success: false, message: "التاجر غير موجود في النظام." });
+  }
+
+  const now = Date.now();
+
+  if (!enabled) {
+    user.cameraFeatureEnabled = false;
+    user.cameraFeatureExpiresAt = 0;
+    user.updatedAt = now;
+    saveStore(systemStore);
+    return res.json({
+      success: true,
+      message: `تم قفل ميزة كاميرا الهاتف اللاسلكية للتاجر (${user.fullName}) بنجاح.`
+    });
+  }
+
+  let expiresAt = 0;
+  if (isUnlimited) {
+    expiresAt = now + (100 * 365 * 86400000); // 100 years = infinity
+  } else {
+    const val = Math.max(1, parseInt(durationValue, 10) || 1);
+    let ms = 0;
+    if (durationUnit === 'minute' || durationUnit === 'minutes') {
+      ms = val * 60 * 1000;
+    } else if (durationUnit === 'hour' || durationUnit === 'hours') {
+      ms = val * 3600 * 1000;
+    } else if (durationUnit === 'day' || durationUnit === 'days') {
+      ms = val * 86400 * 1000;
+    } else if (durationUnit === 'week' || durationUnit === 'weeks') {
+      ms = val * 7 * 86400 * 1000;
+    } else if (durationUnit === 'month' || durationUnit === 'months') {
+      ms = val * 30 * 86400 * 1000;
+    } else if (durationUnit === 'year' || durationUnit === 'years') {
+      ms = val * 365 * 86400 * 1000;
+    } else {
+      ms = val * 86400 * 1000;
+    }
+    expiresAt = now + ms;
+  }
+
+  user.cameraFeatureEnabled = true;
+  user.cameraFeatureExpiresAt = expiresAt;
+  user.updatedAt = now;
+  saveStore(systemStore);
+
+  console.log(`[تفعيل كاميرا الهاتف] تم تفعيل الميزة للتاجر ${user.fullName} (${user.phone}) حتى: ${new Date(expiresAt).toLocaleString()}`);
+
+  res.json({
+    success: true,
+    message: `تم فتح وتفعيل ميزة كاميرا الهاتف اللاسلكية للتاجر (${user.fullName}) بنجاح!`,
+    cameraFeatureEnabled: true,
+    cameraFeatureExpiresAt: expiresAt
   });
 });
 

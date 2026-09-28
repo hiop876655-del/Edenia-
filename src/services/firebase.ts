@@ -14,7 +14,8 @@ import {
   getDocs,
   query,
   where,
-  orderBy
+  orderBy,
+  onSnapshot
 } from 'firebase/firestore';
 import config from '../../firebase-applet-config.json';
 import { checkRealInternetConnection } from './network';
@@ -85,15 +86,35 @@ export async function registerMerchantInFirebase(payload: MerchantRegistrationPa
 // 2. Real-time Status Check in Cloud Firestore
 export async function checkMerchantStatusInFirebase(phone: string) {
   const cleanPhone = phone.replace(/[^0-9]/g, '');
+  const trimmedPhone = phone.trim();
   const merchantDocId = `m_${cleanPhone}`;
   const merchantRef = doc(firestore, 'merchants', merchantDocId);
 
-  const docSnap = await getDoc(merchantRef);
-  if (!docSnap.exists()) {
+  let docSnap = await getDoc(merchantRef);
+  let data: any = null;
+
+  if (docSnap.exists()) {
+    data = docSnap.data();
+  } else {
+    // Fallback: search by phone variations
+    try {
+      const q = query(
+        collection(firestore, 'merchants'),
+        where('phone', 'in', [trimmedPhone, cleanPhone, `0${cleanPhone}`.replace(/^00/, '0')])
+      );
+      const querySnap = await getDocs(q);
+      if (!querySnap.empty) {
+        data = querySnap.docs[0].data();
+      }
+    } catch {
+      // ignore query error
+    }
+  }
+
+  if (!data) {
     return { exists: false, status: 'deleted' };
   }
 
-  const data = docSnap.data();
   const now = Date.now();
   let status = data.subscriptionStatus || 'pending';
   const expiresAt = data.subscriptionExpiresAt || 0;
@@ -103,6 +124,10 @@ export async function checkMerchantStatusInFirebase(phone: string) {
   }
 
   const remainingDays = expiresAt > now ? Math.ceil((expiresAt - now) / 86400000) : 0;
+  const isCameraActive = Boolean(
+    data.cameraFeatureEnabled &&
+    (!data.cameraFeatureExpiresAt || data.cameraFeatureExpiresAt === 0 || data.cameraFeatureExpiresAt > now)
+  );
 
   return {
     exists: true,
@@ -111,8 +136,64 @@ export async function checkMerchantStatusInFirebase(phone: string) {
     subscriptionExpiresAt: expiresAt,
     subscriptionActivatedAt: data.subscriptionActivatedAt || 0,
     remainingDays,
-    remainingMs: Math.max(0, expiresAt - now)
+    remainingMs: Math.max(0, expiresAt - now),
+    cameraFeatureEnabled: isCameraActive,
+    cameraFeatureExpiresAt: data.cameraFeatureExpiresAt || 0,
+    cameraFeatureRawEnabled: Boolean(data.cameraFeatureEnabled)
   };
+}
+
+// 2.1. Live Firestore Real-Time Subscription for Instant Sub-Second Sync
+export function subscribeToMerchantStatusInFirebase(phone: string, onUpdate: (status: any) => void) {
+  const cleanPhone = phone.replace(/[^0-9]/g, '');
+  if (!cleanPhone) return () => {};
+
+  const merchantDocId = `m_${cleanPhone}`;
+  const merchantRef = doc(firestore, 'merchants', merchantDocId);
+
+  try {
+    const unsubscribe = onSnapshot(merchantRef, (docSnap) => {
+      if (!docSnap.exists()) {
+        onUpdate({ exists: false, status: 'deleted' });
+        return;
+      }
+
+      const data = docSnap.data();
+      const now = Date.now();
+      let status = data.subscriptionStatus || 'pending';
+      const expiresAt = data.subscriptionExpiresAt || 0;
+
+      if (status === 'active' && expiresAt > 0 && now >= expiresAt) {
+        status = 'expired';
+      }
+
+      const remainingDays = expiresAt > now ? Math.ceil((expiresAt - now) / 86400000) : 0;
+      const isCameraActive = Boolean(
+        data.cameraFeatureEnabled &&
+        (!data.cameraFeatureExpiresAt || data.cameraFeatureExpiresAt === 0 || data.cameraFeatureExpiresAt > now)
+      );
+
+      onUpdate({
+        exists: true,
+        status,
+        subscriptionDays: data.subscriptionDays || 0,
+        subscriptionExpiresAt: expiresAt,
+        subscriptionActivatedAt: data.subscriptionActivatedAt || 0,
+        remainingDays,
+        remainingMs: Math.max(0, expiresAt - now),
+        cameraFeatureEnabled: isCameraActive,
+        cameraFeatureExpiresAt: data.cameraFeatureExpiresAt || 0,
+        cameraFeatureRawEnabled: Boolean(data.cameraFeatureEnabled)
+      });
+    }, (error) => {
+      console.warn('Realtime merchant snapshot error:', error);
+    });
+
+    return unsubscribe;
+  } catch (err) {
+    console.warn('Could not setup realtime snapshot:', err);
+    return () => {};
+  }
 }
 
 // 3. Admin: Activate Merchant in Firebase (By Days Counter)
@@ -233,6 +314,46 @@ export async function updateMerchantPasswordInFirebase(phone: string, newPasswor
   return { success: true };
 }
 
+// 8.01. Admin: Update Merchant Camera Feature in Firebase
+export async function updateMerchantCameraFeatureInFirebase(phone: string, enabled: boolean, expiresAt: number) {
+  try {
+    const cleanPhone = phone.replace(/[^0-9]/g, '');
+    const trimmedPhone = phone.trim();
+    const merchantDocId = `m_${cleanPhone}`;
+    const merchantRef = doc(firestore, 'merchants', merchantDocId);
+
+    const payload = {
+      cameraFeatureEnabled: enabled,
+      cameraFeatureExpiresAt: expiresAt,
+      cameraFeatureUpdatedAt: Date.now(),
+      updatedAt: Date.now()
+    };
+
+    await setDoc(merchantRef, payload, { merge: true });
+
+    // Also update any queried docs with different ID if applicable
+    try {
+      const q = query(
+        collection(firestore, 'merchants'),
+        where('phone', 'in', [trimmedPhone, cleanPhone, `0${cleanPhone}`.replace(/^00/, '0')])
+      );
+      const querySnap = await getDocs(q);
+      querySnap.forEach(async (d) => {
+        if (d.id !== merchantDocId) {
+          await setDoc(doc(firestore, 'merchants', d.id), payload, { merge: true });
+        }
+      });
+    } catch {
+      // non-blocking
+    }
+
+    return { success: true };
+  } catch (err) {
+    console.warn('Firebase camera feature update error:', err);
+    return { success: false };
+  }
+}
+
 // 8.1. Cloud Merchant Login & Password Verification
 export async function loginMerchantInFirebase(phone: string, inputPassword: string) {
   const isOnline = await checkRealInternetConnection(3000);
@@ -297,6 +418,10 @@ export async function loginMerchantInFirebase(phone: string, inputPassword: stri
     status = 'expired';
   }
   const remainingDays = expiresAt > now ? Math.ceil((expiresAt - now) / 86400000) : 0;
+  const isCameraActive = Boolean(
+    targetData.cameraFeatureEnabled &&
+    (!targetData.cameraFeatureExpiresAt || targetData.cameraFeatureExpiresAt === 0 || targetData.cameraFeatureExpiresAt > now)
+  );
 
   // Retrieve cloud database config if saved
   let cloudConfig = targetData.cloudDbConfig || null;
@@ -328,6 +453,8 @@ export async function loginMerchantInFirebase(phone: string, inputPassword: stri
       subscriptionDays: targetData.subscriptionDays || 0,
       subscriptionExpiresAt: expiresAt,
       remainingDays,
+      cameraFeatureEnabled: isCameraActive,
+      cameraFeatureExpiresAt: targetData.cameraFeatureExpiresAt || 0,
       isLoggedIn: true,
       cloudDbConfig: cloudConfig
     }
@@ -352,6 +479,10 @@ export async function getAdminDataFromFirebase() {
       status = 'expired';
     }
     const remainingDays = expiresAt > now ? Math.ceil((expiresAt - now) / 86400000) : 0;
+    const isCameraActive = Boolean(
+      data.cameraFeatureEnabled &&
+      (!data.cameraFeatureExpiresAt || data.cameraFeatureExpiresAt === 0 || data.cameraFeatureExpiresAt > now)
+    );
 
     return {
       id: d.id,
@@ -359,6 +490,8 @@ export async function getAdminDataFromFirebase() {
       password: data.password || '',
       subscriptionStatus: status,
       remainingDays,
+      cameraFeatureEnabled: isCameraActive,
+      cameraFeatureExpiresAt: data.cameraFeatureExpiresAt || 0,
       hasActiveLicense: status === 'active' && expiresAt > now,
       licenseRemainingMs: Math.max(0, expiresAt - now)
     };
