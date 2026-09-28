@@ -1,5 +1,5 @@
 import React, { useRef } from 'react';
-import { Printer, X, Check, Share2, Copy } from 'lucide-react';
+import { Printer, X, Check, Share2, Copy, RotateCcw } from 'lucide-react';
 import { Sale, AppSettings } from '../types';
 
 interface ThermalReceiptModalProps {
@@ -7,13 +7,15 @@ interface ThermalReceiptModalProps {
   settings: AppSettings;
   isOpen: boolean;
   onClose: () => void;
+  onVoid?: (saleId: string) => void;
 }
 
 export const ThermalReceiptModal: React.FC<ThermalReceiptModalProps> = ({
   sale,
   settings,
   isOpen,
-  onClose
+  onClose,
+  onVoid
 }) => {
   const receiptRef = useRef<HTMLDivElement>(null);
   const [copied, setCopied] = React.useState(false);
@@ -184,14 +186,33 @@ export const ThermalReceiptModal: React.FC<ThermalReceiptModalProps> = ({
         </div>
 
         {/* Action Controls */}
-        <div className="flex items-center justify-between p-4 bg-gray-50 dark:bg-zinc-900 border-t border-gray-100 dark:border-gray-800">
-          <button
-            onClick={handleCopyText}
-            className="flex items-center gap-2 px-3.5 py-2 text-xs font-semibold text-gray-700 dark:text-gray-200 bg-white dark:bg-zinc-800 border border-gray-200 dark:border-gray-700 rounded-xl hover:bg-gray-100 dark:hover:bg-zinc-700 transition-colors cursor-pointer"
-          >
-            {copied ? <Check className="w-4 h-4 text-emerald-600" /> : <Copy className="w-4 h-4" />}
-            <span>{copied ? 'تم النسخ' : 'نسخ النص'}</span>
-          </button>
+        <div className="flex flex-wrap items-center justify-between gap-2 p-4 bg-gray-50 dark:bg-zinc-900 border-t border-gray-100 dark:border-gray-800">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleCopyText}
+              className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-gray-700 dark:text-gray-200 bg-white dark:bg-zinc-800 border border-gray-200 dark:border-gray-700 rounded-xl hover:bg-gray-100 dark:hover:bg-zinc-700 transition-colors cursor-pointer"
+            >
+              {copied ? <Check className="w-4 h-4 text-emerald-600" /> : <Copy className="w-4 h-4" />}
+              <span>{copied ? 'تم النسخ' : 'نسخ النص'}</span>
+            </button>
+
+            {onVoid && (
+              <button
+                type="button"
+                onClick={() => {
+                  if (window.confirm(`هل أنت متأكد من إلغاء الفاتورة رقم (${sale.invoice_number})؟\nسيتم إرجاع جميع الأصناف المباعة إلى رصيد المخزن فوراً، وإلغاء أي دين مرتبط بها.`)) {
+                    onVoid(sale.id);
+                    onClose();
+                  }
+                }}
+                className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900/60 hover:bg-red-100 dark:hover:bg-red-900/60 rounded-xl transition-colors cursor-pointer"
+                title="إلغاء الفاتورة واسترجاع البضاعة"
+              >
+                <RotateCcw className="w-4 h-4" />
+                <span>إلغاء العملية</span>
+              </button>
+            )}
+          </div>
 
           <div className="flex items-center gap-2">
             <button

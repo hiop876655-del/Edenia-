@@ -49,6 +49,18 @@ class LicenseManager {
 
     const diffMs = license.expiresAt - now;
 
+    // Lifetime License Handling (Never expires, no countdown)
+    if (license.durationDays >= 36500 || diffMs > 3000 * 86400000) {
+      return {
+        days: 99999,
+        hours: 0,
+        minutes: 0,
+        seconds: 0,
+        formattedArabic: 'رخصة تجارية دائمة مدى الحياة ♾️',
+        isExpired: false
+      };
+    }
+
     if (diffMs <= 0) {
       return {
         days: 0,

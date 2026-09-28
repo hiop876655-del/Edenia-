@@ -156,21 +156,27 @@ export const AccountScreen: React.FC<AccountScreenProps> = ({
               <div className="flex justify-between py-2 border-b border-gray-100 dark:border-gray-800">
                 <span className="text-gray-500">حالة الاشتراك:</span>
                 <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300">
-                  مفعل ونشط
+                  {remainingDays > 3000 || (license?.durationDays && license.durationDays >= 36500)
+                    ? 'رخصة تجارية دائمة ♾️'
+                    : 'مفعل ونشط'}
                 </span>
               </div>
 
               <div className="flex justify-between py-2 border-b border-gray-100 dark:border-gray-800">
                 <span className="text-gray-500">المدة المتبقية:</span>
-                <span className={`font-black text-sm ${remainingDays > 5 ? 'text-[#2E7D32] dark:text-[#66BB6A]' : 'text-red-600'}`}>
-                  {remainingDays} يوماً
+                <span className="font-black text-sm text-[#2E7D32] dark:text-[#66BB6A]">
+                  {remainingDays > 3000 || (license?.durationDays && license.durationDays >= 36500)
+                    ? 'دائم (غير محدد بمدة - بيع نهائي)'
+                    : `${remainingDays} يوماً`}
                 </span>
               </div>
 
               <div className="flex justify-between py-2">
                 <span className="text-gray-500">تاريخ انتهاء الصلاحية:</span>
                 <span className="font-bold text-gray-900 dark:text-white">
-                  {license?.expiresAt ? new Date(license.expiresAt).toLocaleDateString('ar-EG') : 'غير محدد'}
+                  {remainingDays > 3000 || (license?.durationDays && license.durationDays >= 36500)
+                    ? 'مفتوح مدى الحياة ♾️'
+                    : license?.expiresAt ? new Date(license.expiresAt).toLocaleDateString('ar-EG') : 'غير محدد'}
                 </span>
               </div>
             </div>

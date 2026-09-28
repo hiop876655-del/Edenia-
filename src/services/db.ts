@@ -77,38 +77,22 @@ class LocalDatabase {
     }
   }
 
-  // --- Initial Data Clean (Zero dummy data, only user inputs) ---
+  // --- Initial Data Clean & Storage Hardening ---
   public initDatabase() {
-    // Purge old mock/demo products if they were loaded previously
+    // Request persistent browser storage to prevent eviction
+    if (typeof navigator !== 'undefined' && navigator.storage && navigator.storage.persist) {
+      navigator.storage.persist().catch(() => {});
+    }
+
+    // Safety migration: clean any temporary mock tags while strictly preserving ALL user data
     const existingProducts = this.get<Product[]>(STORAGE_KEYS.PRODUCTS, []);
-    const filteredProducts = existingProducts.filter(p => !p.id.startsWith('prod_'));
-    if (filteredProducts.length !== existingProducts.length) {
-      this.set(STORAGE_KEYS.PRODUCTS, filteredProducts);
-    }
-
-    // Purge old mock/demo customers if they were loaded previously
     const existingCustomers = this.get<Customer[]>(STORAGE_KEYS.CUSTOMERS, []);
-    const filteredCustomers = existingCustomers.filter(c => !c.id.startsWith('cust_'));
-    if (filteredCustomers.length !== existingCustomers.length) {
-      this.set(STORAGE_KEYS.CUSTOMERS, filteredCustomers);
-    }
-
-    // Purge old mock/demo debts if they were loaded previously
     const existingDebts = this.get<Debt[]>(STORAGE_KEYS.DEBTS, []);
-    const filteredDebts = existingDebts.filter(d => !d.id.startsWith('debt_'));
-    if (filteredDebts.length !== existingDebts.length) {
-      this.set(STORAGE_KEYS.DEBTS, filteredDebts);
-    }
 
-    // Purge legacy unpartitioned root keys if present
-    try {
-      if (localStorage.getItem('idenia_hisba_sales_v1')) {
-        localStorage.removeItem('idenia_hisba_sales_v1');
-      }
-      if (localStorage.getItem('idenia_hisba_products_v1')) {
-        localStorage.removeItem('idenia_hisba_products_v1');
-      }
-    } catch {}
+    // Ensure state integrity without deleting genuine user items
+    if (!Array.isArray(existingProducts)) this.set(STORAGE_KEYS.PRODUCTS, []);
+    if (!Array.isArray(existingCustomers)) this.set(STORAGE_KEYS.CUSTOMERS, []);
+    if (!Array.isArray(existingDebts)) this.set(STORAGE_KEYS.DEBTS, []);
   }
 
   // --- PRODUCTS ---
@@ -339,25 +323,36 @@ class LocalDatabase {
     }
     this.set(STORAGE_KEYS.PRODUCTS, products);
 
-    if (isCredit && remainingAmount > 0) {
-      let customerId = saleData.customer_id;
+    let finalCustomerId = saleData.customer_id;
+    const trimmedCustomerName = (saleData.customer_name || '').trim();
 
-      if (!customerId) {
-        const existingCust = this.getCustomers().find(c => c.name.trim() === saleData.customer_name?.trim());
+    if (trimmedCustomerName && trimmedCustomerName !== 'عميل نقدي' && trimmedCustomerName !== 'زبون نقدي') {
+      if (!finalCustomerId) {
+        const existingCust = this.getCustomers().find(c => c.name.trim().toLowerCase() === trimmedCustomerName.toLowerCase());
         if (existingCust) {
-          customerId = existingCust.id;
+          finalCustomerId = existingCust.id;
         } else {
           const newCust = this.saveCustomer({
-            name: saleData.customer_name || 'عميل آجل',
-            notes: 'تم إنشاؤه تلقائياً من فاتورة بيع'
+            name: trimmedCustomerName,
+            notes: isCredit ? 'تم إنشاؤه تلقائياً من فاتورة بيع آجل' : 'تم إنشاؤه تلقائياً من نقطة البيع'
           });
-          customerId = newCust.id;
+          finalCustomerId = newCust.id;
         }
+      }
+    }
+
+    if (isCredit && remainingAmount > 0) {
+      if (!finalCustomerId) {
+        const newCust = this.saveCustomer({
+          name: trimmedCustomerName || 'عميل آجل',
+          notes: 'تم إنشاؤه تلقائياً من فاتورة بيع آجل'
+        });
+        finalCustomerId = newCust.id;
       }
 
       this.addDebt({
-        customer_id: customerId,
-        customer_name: saleData.customer_name || 'عميل آجل',
+        customer_id: finalCustomerId,
+        customer_name: trimmedCustomerName || 'عميل آجل',
         sale_id: saleId,
         amount: total,
         paid_amount: paidAmount,
@@ -368,8 +363,8 @@ class LocalDatabase {
     const newSale: Sale = {
       id: saleId,
       invoice_number: invoiceNumber,
-      customer_id: saleData.customer_id,
-      customer_name: saleData.customer_name || (!isCredit ? 'زبون نقدي' : 'عميل آجل'),
+      customer_id: finalCustomerId,
+      customer_name: trimmedCustomerName || (!isCredit ? 'زبون نقدي' : 'عميل آجل'),
       subtotal,
       discount,
       total,
@@ -389,6 +384,126 @@ class LocalDatabase {
     this.triggerCloudSync();
 
     return { success: true, sale: newSale };
+  }
+
+  // --- VOID / CANCEL INVOICE & RESTORE STOCK ---
+  public voidInvoice(saleId: string): { success: boolean; message: string } {
+    const sales = this.getSales();
+    const saleIndex = sales.findIndex(s => s.id === saleId);
+    if (saleIndex === -1) {
+      return { success: false, message: 'الفاتورة غير موجودة أو تم إلغاؤها مسبقاً.' };
+    }
+
+    const targetSale = sales[saleIndex];
+    const products = this.getProducts();
+
+    // 1. Restore product quantities in inventory
+    for (const item of targetSale.items) {
+      const prodIndex = products.findIndex(p => p.id === item.product_id);
+      if (prodIndex !== -1) {
+        const prod = products[prodIndex];
+        const prevQty = prod.quantity;
+        const restoredQty = prevQty + item.quantity;
+        prod.quantity = restoredQty;
+        prod.updated_at = new Date().toISOString();
+
+        this.recordStockMovement({
+          product_id: prod.id,
+          product_name: prod.name,
+          type: 'adjustment',
+          quantity: item.quantity,
+          previous_quantity: prevQty,
+          new_quantity: restoredQty,
+          reason: `إلغاء واسترجاع أصناف فاتورة بيع رقم ${targetSale.invoice_number}`
+        });
+      }
+    }
+    this.set(STORAGE_KEYS.PRODUCTS, products);
+
+    // 2. Reverse associated customer debt if it was credit
+    if (targetSale.payment_type === 'debt' || targetSale.customer_id) {
+      const debts = this.getDebts();
+      const updatedDebts = debts.filter(d => d.sale_id !== saleId);
+      if (updatedDebts.length !== debts.length) {
+        this.set(STORAGE_KEYS.DEBTS, updatedDebts);
+        if (targetSale.customer_id) {
+          this.recalculateCustomerDebt(targetSale.customer_id);
+        }
+      }
+    }
+
+    // 3. Remove from sales list
+    sales.splice(saleIndex, 1);
+    this.set(STORAGE_KEYS.SALES, sales);
+    this.triggerCloudSync();
+
+    return {
+      success: true,
+      message: `تم إلغاء الفاتورة ${targetSale.invoice_number} وإعادة جميع الأصناف المباعة إلى رصيد المخزن بنجاح.`
+    };
+  }
+
+  // --- CUSTOMER STATEMENT & DAILY LEDGER ---
+  public getCustomerInvoices(customerId: string): Sale[] {
+    return this.getSales().filter(s => s.customer_id === customerId);
+  }
+
+  public getCustomerDailyLedger(customerId: string) {
+    const customerInvoices = this.getCustomerInvoices(customerId);
+    const customerPayments = this.getDebtPayments().filter(p => p.customer_id === customerId);
+
+    // Group by Day (YYYY-MM-DD)
+    const dayMap = new Map<string, {
+      date: string;
+      dateFormatted: string;
+      sales: Sale[];
+      payments: DebtPayment[];
+      totalSales: number;
+      totalPaid: number;
+      remainingDelta: number;
+    }>();
+
+    customerInvoices.forEach(sale => {
+      const dayKey = sale.created_at.split('T')[0];
+      if (!dayMap.has(dayKey)) {
+        const d = new Date(dayKey);
+        dayMap.set(dayKey, {
+          date: dayKey,
+          dateFormatted: d.toLocaleDateString('ar-EG', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }),
+          sales: [],
+          payments: [],
+          totalSales: 0,
+          totalPaid: 0,
+          remainingDelta: 0
+        });
+      }
+      const entry = dayMap.get(dayKey)!;
+      entry.sales.push(sale);
+      entry.totalSales += sale.total;
+      entry.remainingDelta += (sale.remaining_amount || 0);
+    });
+
+    customerPayments.forEach(pay => {
+      const dayKey = pay.payment_date.split('T')[0];
+      if (!dayMap.has(dayKey)) {
+        const d = new Date(dayKey);
+        dayMap.set(dayKey, {
+          date: dayKey,
+          dateFormatted: d.toLocaleDateString('ar-EG', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }),
+          sales: [],
+          payments: [],
+          totalSales: 0,
+          totalPaid: 0,
+          remainingDelta: 0
+        });
+      }
+      const entry = dayMap.get(dayKey)!;
+      entry.payments.push(pay);
+      entry.totalPaid += pay.amount;
+      entry.remainingDelta -= pay.amount;
+    });
+
+    return Array.from(dayMap.values()).sort((a, b) => b.date.localeCompare(a.date));
   }
 
   // --- CUSTOMERS ---

@@ -112,13 +112,22 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
         </div>
 
-        {/* Center: Live License Countdown Timer */}
+        {/* Center: Live License Countdown Timer or Lifetime Badge */}
         {license && license.isValid && (
-          <div className="hidden lg:flex items-center gap-2 bg-emerald-50 dark:bg-[#2E7D32]/15 text-[#2E7D32] dark:text-[#66BB6A] border border-emerald-200 dark:border-emerald-800/50 px-3 py-1 rounded-xl font-bold text-xs">
-            <Clock className="w-3.5 h-3.5 shrink-0 text-[#2E7D32] dark:text-[#66BB6A]" />
-            <span className="tracking-wide font-mono">
-              {timeRemaining.formattedArabic}
-            </span>
+          <div className="hidden lg:flex items-center gap-2 bg-emerald-50 dark:bg-[#2E7D32]/15 text-[#2E7D32] dark:text-[#66BB6A] border border-emerald-200 dark:border-emerald-800/50 px-3 py-1 rounded-xl font-bold text-xs shadow-2xs">
+            {timeRemaining.formattedArabic.includes('دائمة') || timeRemaining.days >= 3000 ? (
+              <span className="flex items-center gap-1.5 font-black text-emerald-800 dark:text-emerald-300">
+                <span className="text-amber-500 font-black text-sm">♾️</span>
+                <span>رخصة تجارية دائمة مدى الحياة</span>
+              </span>
+            ) : (
+              <>
+                <Clock className="w-3.5 h-3.5 shrink-0 text-[#2E7D32] dark:text-[#66BB6A]" />
+                <span className="tracking-wide font-mono">
+                  {timeRemaining.formattedArabic}
+                </span>
+              </>
+            )}
           </div>
         )}
 

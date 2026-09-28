@@ -16,10 +16,13 @@ import {
   RotateCcw,
   History,
   QrCode,
-  Package
+  Package,
+  Camera,
+  Smartphone
 } from 'lucide-react';
 import { db } from '../services/db';
 import { Product, Customer, Sale, SaleItem, AppSettings } from '../types';
+import { MobileScannerModal } from '../components/MobileScannerModal';
 
 interface SalesScreenProps {
   onShowReceipt: (sale: Sale) => void;
@@ -45,6 +48,7 @@ export const SalesScreen: React.FC<SalesScreenProps> = ({ onShowReceipt }) => {
   const [activeTab, setActiveTab] = useState<'pos' | 'history'>('pos');
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [isScannerOpen, setIsScannerOpen] = useState(false);
 
   const loadData = () => {
     setProducts(db.getProducts());
@@ -56,6 +60,24 @@ export const SalesScreen: React.FC<SalesScreenProps> = ({ onShowReceipt }) => {
   useEffect(() => {
     loadData();
   }, []);
+
+  // Audio Beep
+  const playBeep = () => {
+    try {
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = new AudioCtx();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.frequency.setValueAtTime(1400, ctx.currentTime);
+      gain.gain.setValueAtTime(0.18, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.12);
+      osc.start(ctx.currentTime);
+      osc.stop(ctx.currentTime + 0.12);
+    } catch {}
+  };
 
   // Calculate totals
   const subtotal = cart.reduce((sum, it) => sum + it.total_price, 0);
@@ -69,12 +91,14 @@ export const SalesScreen: React.FC<SalesScreenProps> = ({ onShowReceipt }) => {
     }
   }, [total, paymentType]);
 
-  const addToCart = (product: Product) => {
+  const addToCart = (product: Product, playAudio = false) => {
     if (product.quantity <= 0) {
-      setErrorMessage(`المنتج (${product.name}) غير متوفر حالياً في المخزن!`);
-      setTimeout(() => setErrorMessage(null), 3000);
+      setErrorMessage(`عفواً، لقد نفد مخزون الصنف (${product.name}) بالكامل من المخزن (الكمية: 0)!`);
+      setTimeout(() => setErrorMessage(null), 3500);
       return;
     }
+
+    if (playAudio) playBeep();
 
     setCart(prev => {
       const existing = prev.find(it => it.product_id === product.id);
@@ -112,6 +136,36 @@ export const SalesScreen: React.FC<SalesScreenProps> = ({ onShowReceipt }) => {
       return [...prev, newItem];
     });
   };
+
+  // Handler for Barcode Detection from Scanner or Search
+  const handleBarcodeDetected = (scannedCode: string) => {
+    const clean = scannedCode.trim();
+    if (!clean) return;
+
+    const found = products.find(p => p.barcode && p.barcode.trim().toLowerCase() === clean.toLowerCase());
+    if (found) {
+      addToCart(found, true);
+      setSuccessMessage(`تم التقاط الصنف وإضافته للفاتورة: ${found.name}`);
+      setTimeout(() => setSuccessMessage(null), 2500);
+    } else {
+      setErrorMessage(`لم يتم العثور على منتج مسجل بالباركود (${clean}) في المخزن.`);
+      setTimeout(() => setErrorMessage(null), 3500);
+    }
+  };
+
+  // Auto-detect barcode entered directly into search box
+  useEffect(() => {
+    const trimmed = productSearch.trim();
+    if (trimmed && trimmed.length >= 4) {
+      const match = products.find(p => p.barcode && p.barcode.trim().toLowerCase() === trimmed.toLowerCase());
+      if (match) {
+        addToCart(match, true);
+        setProductSearch('');
+        setSuccessMessage(`تم التقاط وإضافة الصنف بالباركود: ${match.name}`);
+        setTimeout(() => setSuccessMessage(null), 2500);
+      }
+    }
+  }, [productSearch, products]);
 
   const updateQuantity = (productId: string, newQty: number) => {
     const prod = products.find(p => p.id === productId);
@@ -266,23 +320,33 @@ export const SalesScreen: React.FC<SalesScreenProps> = ({ onShowReceipt }) => {
           {/* Left Column: Product Grid for Fast Selection */}
           <div className="lg:col-span-7 space-y-4">
             {/* Search and Barcode Input */}
-            <div className="bg-white dark:bg-[#1E1E1E] p-3 rounded-2xl border border-gray-200 dark:border-gray-800 shadow-xs flex items-center gap-2">
-              <Search className="w-4 h-4 text-gray-400" />
+            <div className="bg-white dark:bg-[#1E1E1E] p-2.5 rounded-2xl border border-gray-200 dark:border-gray-800 shadow-xs flex items-center gap-2">
+              <Search className="w-4 h-4 text-gray-400 shrink-0" />
               <input
                 type="text"
-                placeholder="ابحث باسم المنتج، الصنف، أو امسح الباركود..."
+                placeholder="ابحث باسم المنتج، الصنف، أو اكتب / امسح الباركود..."
                 value={productSearch}
                 onChange={e => setProductSearch(e.target.value)}
                 className="w-full text-xs bg-transparent border-none focus:outline-hidden text-gray-900 dark:text-white"
               />
               {productSearch && (
                 <button
+                  type="button"
                   onClick={() => setProductSearch('')}
-                  className="text-gray-400 hover:text-gray-600 text-xs cursor-pointer px-2"
+                  className="text-gray-400 hover:text-gray-600 text-xs cursor-pointer px-1.5"
                 >
                   مسح
                 </button>
               )}
+              <button
+                type="button"
+                onClick={() => setIsScannerOpen(true)}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-300 dark:border-emerald-800 text-[#2E7D32] dark:text-emerald-400 font-bold text-xs rounded-xl hover:bg-emerald-100 dark:hover:bg-emerald-900/60 cursor-pointer shrink-0 transition-colors shadow-2xs"
+                title="قارئ الباركود عبر كاميرا الموبايل أو الكمبيوتر"
+              >
+                <Camera className="w-4 h-4" />
+                <span className="hidden sm:inline">كاميرا الموبايل</span>
+              </button>
             </div>
 
             {/* Products Quick Grid */}
@@ -294,7 +358,14 @@ export const SalesScreen: React.FC<SalesScreenProps> = ({ onShowReceipt }) => {
                 return (
                   <div
                     key={prod.id}
-                    onClick={() => !isOutOfStock && addToCart(prod)}
+                    onClick={() => {
+                      if (isOutOfStock) {
+                        setErrorMessage(`عفواً، لقد نفد مخزون الصنف (${prod.name}) بالكامل من المخزن (0)!`);
+                        setTimeout(() => setErrorMessage(null), 3000);
+                      } else {
+                        addToCart(prod, true);
+                      }
+                    }}
                     className={`relative p-3 rounded-2xl border transition-all select-none flex flex-col justify-between text-right ${
                       isOutOfStock
                         ? 'bg-gray-100 dark:bg-zinc-900/40 border-gray-200 dark:border-gray-800 opacity-60 cursor-not-allowed'
@@ -310,22 +381,33 @@ export const SalesScreen: React.FC<SalesScreenProps> = ({ onShowReceipt }) => {
                     )}
 
                     <div className="space-y-1">
-                      <div className="text-[10px] font-bold text-gray-400">{prod.category}</div>
+                      <div className="flex items-center justify-between text-[10px]">
+                        <span className="font-bold text-gray-400">{prod.category}</span>
+                        {prod.barcode && (
+                          <span className="font-mono bg-gray-100 dark:bg-zinc-800 text-gray-700 dark:text-gray-300 px-1 py-0.5 rounded text-[9px] font-semibold border border-gray-200 dark:border-zinc-700">
+                            #{prod.barcode}
+                          </span>
+                        )}
+                      </div>
                       <h4 className="font-extrabold text-xs text-gray-900 dark:text-white line-clamp-2">
                         {prod.name}
                       </h4>
                     </div>
 
-                    <div className="pt-3 flex items-center justify-between border-t border-gray-100 dark:border-gray-800/80 mt-2">
+                    <div className="pt-2.5 flex items-center justify-between border-t border-gray-100 dark:border-gray-800/80 mt-2">
                       <div className="font-black text-xs text-[#2E7D32] dark:text-[#66BB6A]">
                         {prod.selling_price.toFixed(2)} {settings.currency_symbol}
                       </div>
 
-                      <div className="text-[10px] text-gray-500 dark:text-gray-400">
+                      <div className="text-[10px]">
                         {isOutOfStock ? (
-                          <span className="text-red-500 font-bold">نفد</span>
+                          <span className="px-1.5 py-0.5 rounded bg-red-100 dark:bg-red-950 text-red-600 dark:text-red-400 font-extrabold text-[9px]">
+                            نفد المخزون (0)
+                          </span>
                         ) : (
-                          <span>المتاح: <strong>{prod.quantity}</strong></span>
+                          <span className="text-gray-500 dark:text-gray-400">
+                            المتاح: <strong className="text-gray-900 dark:text-white font-black">{prod.quantity}</strong>
+                          </span>
                         )}
                       </div>
                     </div>
@@ -592,13 +674,37 @@ export const SalesScreen: React.FC<SalesScreenProps> = ({ onShowReceipt }) => {
                       {new Date(sale.created_at).toLocaleDateString('ar-EG')}
                     </td>
                     <td className="py-3 px-4 text-center">
-                      <button
-                        onClick={() => onShowReceipt(sale)}
-                        className="p-1.5 text-gray-500 hover:text-[#2E7D32] rounded-lg cursor-pointer"
-                        title="طباعة الإيصال"
-                      >
-                        <Printer className="w-4 h-4" />
-                      </button>
+                      <div className="flex items-center justify-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => onShowReceipt(sale)}
+                          className="p-1.5 text-gray-500 hover:text-[#2E7D32] hover:bg-emerald-50 dark:hover:bg-emerald-950/40 rounded-lg cursor-pointer transition-colors"
+                          title="عرض وطباعة الإيصال الحراري"
+                        >
+                          <Printer className="w-4 h-4" />
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (window.confirm(`هل أنت متأكد من إلغاء الفاتورة رقم (${sale.invoice_number})؟\nسيتم إرجاع جميع الأصناف المباعة إلى رصيد المخزن فوراً وإلغاء أي حساب أو دين مرتبط بها.`)) {
+                              const res = db.voidInvoice(sale.id);
+                              if (res.success) {
+                                setSuccessMessage(res.message);
+                                loadData();
+                                setTimeout(() => setSuccessMessage(null), 3500);
+                              } else {
+                                setErrorMessage(res.message);
+                                setTimeout(() => setErrorMessage(null), 3000);
+                              }
+                            }
+                          }}
+                          className="p-1.5 text-red-500 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/40 rounded-lg cursor-pointer transition-colors"
+                          title="إلغاء الفاتورة واسترجاع الأصناف للمخزن"
+                        >
+                          <RotateCcw className="w-4 h-4" />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -607,6 +713,13 @@ export const SalesScreen: React.FC<SalesScreenProps> = ({ onShowReceipt }) => {
           </div>
         </div>
       )}
+
+      {/* Wireless Mobile Barcode Scanner Modal */}
+      <MobileScannerModal
+        isOpen={isScannerOpen}
+        onClose={() => setIsScannerOpen(false)}
+        onBarcodeDetected={handleBarcodeDetected}
+      />
     </div>
   );
 };

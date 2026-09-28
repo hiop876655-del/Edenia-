@@ -569,6 +569,10 @@ export function App() {
         settings={db.getSettings()}
         isOpen={!!viewingReceiptSale}
         onClose={() => setViewingReceiptSale(null)}
+        onVoid={(saleId) => {
+          db.voidInvoice(saleId);
+          setViewingReceiptSale(null);
+        }}
       />
 
       <MobileMoreDrawer

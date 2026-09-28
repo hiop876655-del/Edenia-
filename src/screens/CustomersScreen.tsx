@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Users,
   Search,
@@ -10,10 +10,18 @@ import {
   BadgeDollarSign,
   FileText,
   CheckCircle2,
-  X
+  X,
+  Calendar,
+  Clock,
+  Printer,
+  ChevronDown,
+  ArrowRight,
+  TrendingDown,
+  TrendingUp,
+  Receipt
 } from 'lucide-react';
 import { db } from '../services/db';
-import { Customer, AppSettings, Debt, DebtPayment } from '../types';
+import { Customer, AppSettings, Debt, DebtPayment, Sale } from '../types';
 import { ConfirmModal } from '../components/ConfirmModal';
 
 interface CustomersScreenProps {
@@ -37,6 +45,19 @@ export const CustomersScreen: React.FC<CustomersScreenProps> = () => {
   const [paymentAmount, setPaymentAmount] = useState<number>(0);
   const [paymentNotes, setPaymentNotes] = useState<string>('');
 
+  // Statement / Daily Ledger Modal state
+  const [selectedStatementCustomer, setSelectedStatementCustomer] = useState<Customer | null>(null);
+  const [statementTab, setStatementTab] = useState<'daily' | 'invoices' | 'payments'>('daily');
+  const [statementLedger, setStatementLedger] = useState<any[]>([]);
+  const [customerInvoices, setCustomerInvoices] = useState<Sale[]>([]);
+  const [customerPayments, setCustomerPayments] = useState<DebtPayment[]>([]);
+
+  // Payment Receipt Modal State
+  const [justRecordedPayment, setJustRecordedPayment] = useState<{
+    customer: Customer;
+    payment: DebtPayment;
+  } | null>(null);
+
   // Delete confirm
   const [deleteCustomerId, setDeleteCustomerId] = useState<string | null>(null);
 
@@ -48,6 +69,18 @@ export const CustomersScreen: React.FC<CustomersScreenProps> = () => {
   useEffect(() => {
     loadData();
   }, []);
+
+  const openCustomerStatement = (customer: Customer) => {
+    setSelectedStatementCustomer(customer);
+    const ledger = db.getCustomerDailyLedger(customer.id);
+    const invoices = db.getCustomerInvoices(customer.id);
+    const payments = db.getDebtPayments().filter(p => p.customer_id === customer.id);
+
+    setStatementLedger(ledger);
+    setCustomerInvoices(invoices);
+    setCustomerPayments(payments);
+    setStatementTab('daily');
+  };
 
   const resetForm = () => {
     setEditingId(null);
@@ -79,7 +112,14 @@ export const CustomersScreen: React.FC<CustomersScreenProps> = () => {
     e.preventDefault();
     if (!paymentModalCustomer || paymentAmount <= 0) return;
 
-    db.recordDebtPayment(paymentModalCustomer.id, paymentAmount, paymentNotes);
+    const res = db.recordDebtPayment(paymentModalCustomer.id, paymentAmount, paymentNotes);
+    if (res.success && res.payment) {
+      setJustRecordedPayment({
+        customer: paymentModalCustomer,
+        payment: res.payment
+      });
+    }
+
     setPaymentModalCustomer(null);
     setPaymentAmount(0);
     setPaymentNotes('');
@@ -205,18 +245,26 @@ export const CustomersScreen: React.FC<CustomersScreenProps> = () => {
               </span>
             </div>
 
-            {/* Quick Action */}
-            <div className="pt-2 flex items-center gap-2">
+            {/* Quick Actions */}
+            <div className="pt-2 grid grid-cols-2 gap-2">
               <button
                 onClick={() => {
                   setPaymentModalCustomer(customer);
                   setPaymentAmount(customer.remaining_debt > 0 ? customer.remaining_debt : 0);
                   setPaymentNotes('سداد دفعة نقدية');
                 }}
-                className="w-full py-2 bg-emerald-50 dark:bg-emerald-950/40 hover:bg-emerald-100 text-[#2E7D32] dark:text-[#66BB6A] text-xs font-bold rounded-xl flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
+                className="py-2 px-2 bg-emerald-50 dark:bg-emerald-950/40 hover:bg-emerald-100 text-[#2E7D32] dark:text-[#66BB6A] text-[11px] font-bold rounded-xl flex items-center justify-center gap-1 cursor-pointer transition-colors"
               >
-                <BadgeDollarSign className="w-4 h-4" />
-                <span>تسجيل دفعة / سداد</span>
+                <BadgeDollarSign className="w-3.5 h-3.5" />
+                <span>تسجيل دفعة</span>
+              </button>
+
+              <button
+                onClick={() => openCustomerStatement(customer)}
+                className="py-2 px-2 bg-blue-50 dark:bg-blue-950/40 hover:bg-blue-100 text-blue-700 dark:text-blue-300 text-[11px] font-bold rounded-xl flex items-center justify-center gap-1 cursor-pointer transition-colors"
+              >
+                <Receipt className="w-3.5 h-3.5" />
+                <span>كشف الحساب والدمج</span>
               </button>
             </div>
           </div>
@@ -358,6 +406,370 @@ export const CustomersScreen: React.FC<CustomersScreenProps> = () => {
         onConfirm={handleDeleteConfirm}
         onClose={() => setDeleteCustomerId(null)}
       />
+
+      {/* Customer Account Statement & Daily Ledger Modal */}
+      {selectedStatementCustomer && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-xs p-4 select-none" dir="rtl">
+          <div className="bg-white dark:bg-[#1E1E1E] rounded-3xl shadow-2xl max-w-3xl w-full max-h-[90vh] flex flex-col overflow-hidden border border-gray-200 dark:border-gray-800 animate-in fade-in zoom-in-95 duration-200">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-zinc-900">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-blue-600 text-white flex items-center justify-center shadow-xs">
+                  <Receipt className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-base text-gray-900 dark:text-white flex items-center gap-2">
+                    <span>كشف حساب وسجل معاملات: {selectedStatementCustomer.name}</span>
+                  </h3>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                    سجل الفواتير التاريخي والدمج اليومي التلقائي والدفعات المسددة
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setSelectedStatementCustomer(null)}
+                className="p-1.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 rounded-lg cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Customer Summary Cards */}
+            <div className="p-4 bg-gray-50/50 dark:bg-zinc-900/40 border-b border-gray-100 dark:border-gray-800 grid grid-cols-3 gap-3 text-center">
+              <div className="p-2.5 bg-white dark:bg-[#1E1E1E] rounded-2xl border border-gray-200 dark:border-gray-800">
+                <div className="text-[11px] text-gray-400 font-bold">إجمالي المشتريات الآجلة</div>
+                <div className="text-sm font-black text-gray-900 dark:text-white mt-0.5">
+                  {selectedStatementCustomer.total_debt.toFixed(2)} {settings.currency_symbol}
+                </div>
+              </div>
+
+              <div className="p-2.5 bg-white dark:bg-[#1E1E1E] rounded-2xl border border-gray-200 dark:border-gray-800">
+                <div className="text-[11px] text-emerald-600 dark:text-emerald-400 font-bold">إجمالي المسدد</div>
+                <div className="text-sm font-black text-emerald-700 dark:text-emerald-400 mt-0.5">
+                  {selectedStatementCustomer.paid_amount.toFixed(2)} {settings.currency_symbol}
+                </div>
+              </div>
+
+              <div className="p-2.5 bg-red-50 dark:bg-red-950/40 rounded-2xl border border-red-200 dark:border-red-900/60">
+                <div className="text-[11px] text-red-600 dark:text-red-400 font-bold">الرصيد المتبقي (الدين)</div>
+                <div className="text-sm font-black text-red-700 dark:text-red-400 mt-0.5">
+                  {selectedStatementCustomer.remaining_debt.toFixed(2)} {settings.currency_symbol}
+                </div>
+              </div>
+            </div>
+
+            {/* Tab Navigation */}
+            <div className="flex border-b border-gray-100 dark:border-gray-800 px-4 pt-2 gap-2 bg-white dark:bg-[#1E1E1E]">
+              <button
+                onClick={() => setStatementTab('daily')}
+                className={`py-2.5 px-4 text-xs font-bold rounded-t-xl transition-all cursor-pointer flex items-center gap-1.5 ${
+                  statementTab === 'daily'
+                    ? 'border-b-2 border-blue-600 text-blue-600 dark:text-blue-400 bg-blue-50/50 dark:bg-blue-950/20'
+                    : 'text-gray-500 hover:text-gray-900 dark:hover:text-white'
+                }`}
+              >
+                <Calendar className="w-4 h-4" />
+                <span>الدمج اليومي التلقائي ({statementLedger.length} أيام)</span>
+              </button>
+
+              <button
+                onClick={() => setStatementTab('invoices')}
+                className={`py-2.5 px-4 text-xs font-bold rounded-t-xl transition-all cursor-pointer flex items-center gap-1.5 ${
+                  statementTab === 'invoices'
+                    ? 'border-b-2 border-blue-600 text-blue-600 dark:text-blue-400 bg-blue-50/50 dark:bg-blue-950/20'
+                    : 'text-gray-500 hover:text-gray-900 dark:hover:text-white'
+                }`}
+              >
+                <FileText className="w-4 h-4" />
+                <span>جميع الفواتير التفصيلية ({customerInvoices.length})</span>
+              </button>
+
+              <button
+                onClick={() => setStatementTab('payments')}
+                className={`py-2.5 px-4 text-xs font-bold rounded-t-xl transition-all cursor-pointer flex items-center gap-1.5 ${
+                  statementTab === 'payments'
+                    ? 'border-b-2 border-blue-600 text-blue-600 dark:text-blue-400 bg-blue-50/50 dark:bg-blue-950/20'
+                    : 'text-gray-500 hover:text-gray-900 dark:hover:text-white'
+                }`}
+              >
+                <BadgeDollarSign className="w-4 h-4" />
+                <span>سندات سداد الدفعات ({customerPayments.length})</span>
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="flex-1 overflow-y-auto p-5 space-y-4">
+              {statementTab === 'daily' && (
+                <div className="space-y-4">
+                  {statementLedger.length === 0 ? (
+                    <div className="text-center py-12 text-gray-400 text-xs">
+                      لا توجد فواتير أو معاملات مسجلة لهذا العميل حتى الآن.
+                    </div>
+                  ) : (
+                    statementLedger.map((dayEntry, idx) => (
+                      <div
+                        key={dayEntry.date || idx}
+                        className="bg-white dark:bg-zinc-900 rounded-2xl border border-gray-200 dark:border-gray-800 p-4 space-y-3 shadow-xs"
+                      >
+                        {/* Day Header */}
+                        <div className="flex items-center justify-between border-b border-gray-100 dark:border-gray-800 pb-2.5">
+                          <div className="flex items-center gap-2">
+                            <Calendar className="w-4 h-4 text-blue-600" />
+                            <span className="font-extrabold text-xs text-gray-900 dark:text-white">
+                              {dayEntry.dateFormatted}
+                            </span>
+                            <span className="text-[10px] text-gray-400 font-mono">
+                              ({dayEntry.date})
+                            </span>
+                          </div>
+
+                          <div className="flex items-center gap-3 text-xs">
+                            <span className="text-gray-500">
+                              مشتريات: <strong className="text-gray-900 dark:text-white font-bold">{dayEntry.totalSales.toFixed(2)}</strong> {settings.currency_symbol}
+                            </span>
+                            {dayEntry.totalPaid > 0 && (
+                              <span className="text-emerald-600 font-bold">
+                                سداد: +{dayEntry.totalPaid.toFixed(2)} {settings.currency_symbol}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Chronological Timeline */}
+                        <div className="space-y-2 pr-2">
+                          {/* Invoices of the day */}
+                          {dayEntry.sales.map((sale: Sale) => (
+                            <div
+                              key={sale.id}
+                              className="p-3 bg-gray-50 dark:bg-zinc-800/60 rounded-xl flex items-center justify-between text-xs border border-gray-100 dark:border-gray-800"
+                            >
+                              <div className="space-y-1">
+                                <div className="flex items-center gap-2">
+                                  <span className="font-bold text-gray-900 dark:text-white">
+                                    فاتورة رقم {sale.invoice_number}
+                                  </span>
+                                  <span className="text-[10px] text-gray-400 flex items-center gap-1 font-mono">
+                                    <Clock className="w-3 h-3" />
+                                    {new Date(sale.created_at).toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' })}
+                                  </span>
+                                </div>
+                                <div className="text-[11px] text-gray-500">
+                                  الأصناف: {sale.items.map(it => `${it.product_name} (${it.quantity} ${it.unit})`).join('، ')}
+                                </div>
+                              </div>
+
+                              <div className="text-left font-black text-sm text-[#2E7D32] dark:text-[#66BB6A]">
+                                {sale.total.toFixed(2)} {settings.currency_symbol}
+                              </div>
+                            </div>
+                          ))}
+
+                          {/* Payments of the day */}
+                          {dayEntry.payments.map((pay: DebtPayment) => (
+                            <div
+                              key={pay.id}
+                              className="p-3 bg-emerald-50/70 dark:bg-emerald-950/30 rounded-xl flex items-center justify-between text-xs border border-emerald-200 dark:border-emerald-800/60"
+                            >
+                              <div className="space-y-0.5">
+                                <div className="flex items-center gap-2">
+                                  <span className="font-bold text-emerald-800 dark:text-emerald-300">
+                                    سند تسديد دفعة نقدية
+                                  </span>
+                                  <span className="text-[10px] text-emerald-600 flex items-center gap-1 font-mono">
+                                    <Clock className="w-3 h-3" />
+                                    {new Date(pay.payment_date).toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' })}
+                                  </span>
+                                </div>
+                                {pay.notes && (
+                                  <div className="text-[11px] text-emerald-700/80">
+                                    البيان: {pay.notes}
+                                  </div>
+                                )}
+                              </div>
+
+                              <div className="text-left font-black text-sm text-emerald-700 dark:text-emerald-400">
+                                - {pay.amount.toFixed(2)} {settings.currency_symbol}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
+
+              {statementTab === 'invoices' && (
+                <div className="space-y-3">
+                  {customerInvoices.length === 0 ? (
+                    <div className="text-center py-12 text-gray-400 text-xs">
+                      لا توجد فواتير سابقة لهذا العميل.
+                    </div>
+                  ) : (
+                    customerInvoices.map(s => (
+                      <div
+                        key={s.id}
+                        className="p-4 bg-white dark:bg-zinc-900 rounded-2xl border border-gray-200 dark:border-gray-800 flex items-center justify-between text-xs"
+                      >
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-2 font-bold text-gray-900 dark:text-white">
+                            <span>فاتورة #{s.invoice_number}</span>
+                            <span className="text-[10px] text-gray-400 font-mono">
+                              {new Date(s.created_at).toLocaleString('ar-EG')}
+                            </span>
+                          </div>
+                          <div className="text-[11px] text-gray-500">
+                            عدد الأصناف: {s.items_count} | الدفع: {s.payment_type === 'cash' ? 'نقدي' : 'آجل'}
+                          </div>
+                        </div>
+
+                        <div className="text-left font-black text-sm text-[#2E7D32]">
+                          {s.total.toFixed(2)} {settings.currency_symbol}
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
+
+              {statementTab === 'payments' && (
+                <div className="space-y-3">
+                  {customerPayments.length === 0 ? (
+                    <div className="text-center py-12 text-gray-400 text-xs">
+                      لا توجد دفعات مسددة حتى الآن.
+                    </div>
+                  ) : (
+                    customerPayments.map(p => (
+                      <div
+                        key={p.id}
+                        className="p-4 bg-white dark:bg-zinc-900 rounded-2xl border border-gray-200 dark:border-gray-800 flex items-center justify-between text-xs"
+                      >
+                        <div className="space-y-1">
+                          <div className="font-bold text-emerald-800 dark:text-emerald-300">
+                            سند قبض رقم #{p.id.slice(-6)}
+                          </div>
+                          <div className="text-[11px] text-gray-500">
+                            التاريخ: {new Date(p.payment_date).toLocaleString('ar-EG')} {p.notes ? `• ${p.notes}` : ''}
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-3">
+                          <div className="text-left font-black text-sm text-emerald-600">
+                            {p.amount.toFixed(2)} {settings.currency_symbol}
+                          </div>
+                          <button
+                            onClick={() => {
+                              setJustRecordedPayment({
+                                customer: selectedStatementCustomer,
+                                payment: p
+                              });
+                            }}
+                            className="p-1.5 text-gray-500 hover:text-emerald-600 rounded-lg cursor-pointer"
+                            title="طباعة إيصال السند"
+                          >
+                            <Printer className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-4 bg-gray-50 dark:bg-zinc-900 border-t border-gray-100 dark:border-gray-800 flex items-center justify-between">
+              <button
+                type="button"
+                onClick={() => window.print()}
+                className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl shadow-xs transition-colors cursor-pointer"
+              >
+                <Printer className="w-4 h-4" />
+                <span>طباعة كشف الحساب</span>
+              </button>
+
+              <button
+                onClick={() => setSelectedStatementCustomer(null)}
+                className="px-4 py-2 text-xs font-semibold text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-zinc-800 rounded-xl cursor-pointer"
+              >
+                إغلاق
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Official Payment Receipt / Voucher Modal */}
+      {justRecordedPayment && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 select-none" dir="rtl">
+          <div className="bg-white dark:bg-[#1E1E1E] rounded-3xl shadow-2xl max-w-sm w-full p-6 space-y-4 border border-gray-200 dark:border-gray-800 animate-in zoom-in-95 duration-200">
+            <div className="flex items-center justify-between border-b border-gray-100 dark:border-gray-800 pb-3">
+              <div className="flex items-center gap-2">
+                <Receipt className="w-5 h-5 text-emerald-600" />
+                <h3 className="font-extrabold text-sm text-gray-900 dark:text-white">
+                  سند قبض وتأكيد سداد
+                </h3>
+              </div>
+              <button onClick={() => setJustRecordedPayment(null)} className="p-1 text-gray-400 hover:text-gray-600 rounded-lg cursor-pointer">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Receipt Body */}
+            <div className="p-4 bg-gray-50 dark:bg-zinc-900 rounded-2xl border border-dashed border-gray-300 dark:border-gray-700 space-y-2.5 text-xs select-text font-mono">
+              <div className="text-center pb-2 border-b border-gray-200 dark:border-gray-700 space-y-0.5">
+                <div className="font-black text-sm text-gray-900 dark:text-white">{settings.shop_name}</div>
+                <div className="text-[10px] text-gray-500">إيصال استلام دفعة نقدية</div>
+              </div>
+
+              <div className="flex justify-between">
+                <span className="text-gray-500">العميل:</span>
+                <span className="font-bold text-gray-900 dark:text-white">{justRecordedPayment.customer.name}</span>
+              </div>
+
+              <div className="flex justify-between">
+                <span className="text-gray-500">التاريخ والوقت:</span>
+                <span className="text-gray-700 dark:text-gray-300">
+                  {new Date(justRecordedPayment.payment.payment_date).toLocaleString('ar-EG')}
+                </span>
+              </div>
+
+              <div className="flex justify-between py-1 border-y border-gray-200 dark:border-gray-700 text-sm font-black text-emerald-700 dark:text-emerald-400">
+                <span>المبلغ المستلم:</span>
+                <span>{justRecordedPayment.payment.amount.toFixed(2)} {settings.currency_symbol}</span>
+              </div>
+
+              <div className="flex justify-between text-red-600 dark:text-red-400 font-bold">
+                <span>الرصيد المتبقي بالذمة:</span>
+                <span>{justRecordedPayment.customer.remaining_debt.toFixed(2)} {settings.currency_symbol}</span>
+              </div>
+
+              {justRecordedPayment.payment.notes && (
+                <div className="text-[10px] text-gray-400 pt-1">
+                  البيان: {justRecordedPayment.payment.notes}
+                </div>
+              )}
+            </div>
+
+            {/* Actions */}
+            <div className="flex items-center gap-2 pt-2">
+              <button
+                onClick={() => window.print()}
+                className="flex-1 py-2.5 bg-[#2E7D32] hover:bg-[#256628] text-white font-bold text-xs rounded-xl flex items-center justify-center gap-1.5 cursor-pointer shadow-xs"
+              >
+                <Printer className="w-4 h-4" />
+                <span>طباعة الإيصال</span>
+              </button>
+              <button
+                onClick={() => setJustRecordedPayment(null)}
+                className="px-4 py-2.5 text-xs font-semibold text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-zinc-800 rounded-xl cursor-pointer"
+              >
+                تم
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

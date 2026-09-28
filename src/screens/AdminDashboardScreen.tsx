@@ -527,14 +527,26 @@ export const AdminDashboardScreen: React.FC<AdminDashboardScreenProps> = ({
 
                         <td className="py-3.5 px-3">
                           {isActive ? (
-                            <div>
-                              <div className="font-bold text-emerald-600 dark:text-emerald-400">
-                                متبقي: {remainingDays} يوم
+                            merchant.subscriptionDays >= 36500 || remainingDays > 3000 ? (
+                              <div>
+                                <div className="font-extrabold text-emerald-600 dark:text-emerald-400 flex items-center gap-1 text-xs">
+                                  <span>♾️</span>
+                                  <span>دائم (مدى الحياة)</span>
+                                </div>
+                                <div className="text-[10px] text-gray-400 mt-0.5">
+                                  بيع نهائي - رخصة مستمرة
+                                </div>
                               </div>
-                              <div className="text-[10px] text-gray-400 mt-0.5">
-                                ينتهي في: {new Date(merchant.subscriptionExpiresAt).toLocaleDateString('ar-EG')}
+                            ) : (
+                              <div>
+                                <div className="font-bold text-emerald-600 dark:text-emerald-400">
+                                  متبقي: {remainingDays} يوم
+                                </div>
+                                <div className="text-[10px] text-gray-400 mt-0.5">
+                                  ينتهي في: {new Date(merchant.subscriptionExpiresAt).toLocaleDateString('ar-EG')}
+                                </div>
                               </div>
-                            </div>
+                            )
                           ) : isPending ? (
                             <span className="text-gray-400">لم يتم تحديد مدة بعد</span>
                           ) : (
@@ -674,8 +686,9 @@ export const AdminDashboardScreen: React.FC<AdminDashboardScreenProps> = ({
               <label className="text-xs font-bold text-gray-700 dark:text-gray-300 block">
                 اختر مدة الاشتراك بالعداد الزمني:
               </label>
-              <div className="grid grid-cols-3 gap-2">
+              <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
                 {[
+                  { label: '♾️ مدى الحياة (نهائي)', days: 36500 },
                   { label: 'شهر (30 يوم)', days: 30 },
                   { label: '3 أشهر (90 يوم)', days: 90 },
                   { label: '6 أشهر (180 يوم)', days: 180 },
@@ -690,7 +703,7 @@ export const AdminDashboardScreen: React.FC<AdminDashboardScreenProps> = ({
                       setSelectedDays(preset.days);
                       setCustomDaysInput(String(preset.days));
                     }}
-                    className={`p-2.5 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
+                    className={`p-2 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
                       Number(customDaysInput) === preset.days
                         ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
                         : 'bg-gray-50 dark:bg-zinc-800 border-gray-200 dark:border-zinc-700 text-gray-700 dark:text-gray-300 hover:bg-gray-100'

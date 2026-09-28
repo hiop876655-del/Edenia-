@@ -107,7 +107,17 @@ export const ProductsScreen: React.FC<ProductsScreenProps> = ({
   };
 
   const generateRandomBarcode = () => {
-    const code = '622' + Math.floor(100000000 + Math.random() * 900000000);
+    // Generate distinct 4-5 digit short barcode
+    let code = '';
+    const existing = new Set(products.map(p => p.barcode));
+    for (let attempts = 0; attempts < 100; attempts++) {
+      const candidate = String(Math.floor(10000 + Math.random() * 90000));
+      if (!existing.has(candidate)) {
+        code = candidate;
+        break;
+      }
+    }
+    if (!code) code = String(Math.floor(1000 + Math.random() * 9000));
     setBarcode(code);
   };
 
@@ -351,14 +361,30 @@ export const ProductsScreen: React.FC<ProductsScreenProps> = ({
                 key={p.id}
                 className="py-3 flex items-center justify-between gap-3 hover:bg-gray-50 dark:hover:bg-zinc-900/50 px-2 rounded-xl transition-colors"
               >
-                <div className="space-y-0.5">
-                  <div className="font-bold text-xs text-gray-900 dark:text-white">
-                    {p.name}
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-xs text-gray-900 dark:text-white">
+                      {p.name}
+                    </span>
+                    {p.quantity <= 0 ? (
+                      <span className="px-1.5 py-0.5 rounded-md bg-red-100 dark:bg-red-950/60 text-red-600 dark:text-red-400 text-[10px] font-black">
+                        نفد المخزون (0)
+                      </span>
+                    ) : (
+                      <span className="px-1.5 py-0.5 rounded-md bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 text-[10px] font-bold">
+                        متوفر ({p.quantity})
+                      </span>
+                    )}
+                    {p.barcode && (
+                      <span className="font-mono text-[10px] bg-gray-100 dark:bg-zinc-800 text-gray-700 dark:text-gray-300 px-1.5 py-0.5 rounded-md border border-gray-200 dark:border-zinc-700">
+                        #{p.barcode}
+                      </span>
+                    )}
                   </div>
                   <div className="text-[11px] text-gray-500 dark:text-gray-400 flex items-center gap-2">
                     <span>{p.category}</span>
                     <span>•</span>
-                    <span>الكمية: <strong className="text-gray-800 dark:text-gray-200">{p.quantity} {p.unit}</strong></span>
+                    <span>الكمية: <strong className={p.quantity <= 0 ? "text-red-600 font-black" : "text-gray-800 dark:text-gray-200"}>{p.quantity} {p.unit}</strong></span>
                     <span>•</span>
                     <span>سعر البيع: <strong className="text-[#2E7D32] dark:text-[#66BB6A]">{p.selling_price.toFixed(2)} {settings.currency_symbol}</strong></span>
                   </div>
