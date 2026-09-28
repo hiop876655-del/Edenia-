@@ -59,8 +59,15 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
           {/* Logo & Platform Name */}
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-[#2E7D32] text-white font-black text-xl flex items-center justify-center shadow-xs">
-              ح
+            <div className="w-11 h-11 rounded-2xl overflow-hidden shadow-md shadow-emerald-950/20 border border-emerald-700/30 bg-gradient-to-b from-[#0e2c21] to-[#081b14] flex items-center justify-center shrink-0 p-0.5">
+              <img
+                src="/assets/idenia_hisba_logo.png"
+                alt="ايدينيا - حِسبة"
+                className="w-full h-full object-cover rounded-xl"
+                onError={(e) => {
+                  (e.target as HTMLImageElement).src = '/icon-192.png';
+                }}
+              />
             </div>
             <div>
               <div className="flex items-center gap-2">

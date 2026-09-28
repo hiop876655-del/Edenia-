@@ -1,14 +1,14 @@
 {
   "id": "/",
   "name": "ايدينيا - حِسبة",
-  "short_name": "حِسبة",
+  "short_name": "ايدينيا - حِسبة",
   "description": "برنامج حسابات ومخزن تجاري يدوي بالكامل لإدارة المبيعات والمخزون ونقاط البيع بدون إنترنت",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
   "orientation": "any",
-  "background_color": "#F8F9FA",
-  "theme_color": "#2E7D32",
+  "background_color": "#0F291E",
+  "theme_color": "#1B4D3E",
   "lang": "ar",
   "dir": "rtl",
   "icons": [
@@ -25,10 +25,16 @@
       "purpose": "any"
     },
     {
-      "src": "/icon-512.png",
+      "src": "/icon-maskable.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "maskable"
+    },
+    {
+      "src": "/assets/idenia_hisba_logo.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
     }
   ]
 }

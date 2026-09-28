@@ -46,11 +46,18 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ onComplete }) => {
       <div className="max-w-md w-full text-center space-y-6 animate-in fade-in zoom-in-95 duration-500">
         {/* App Logo */}
         <div className="relative inline-flex items-center justify-center">
-          <div className="w-24 h-24 rounded-3xl bg-[#2E7D32] shadow-xl shadow-emerald-700/20 flex items-center justify-center text-white font-black text-5xl">
-            ح
+          <div className="w-28 h-28 rounded-3xl overflow-hidden shadow-2xl shadow-emerald-950/40 border-2 border-amber-400/40 bg-gradient-to-b from-[#0e2c21] to-[#081b14] p-1 flex items-center justify-center">
+            <img
+              src="/assets/idenia_hisba_logo.png"
+              alt="ايدينيا - حِسبة"
+              className="w-full h-full object-cover rounded-2xl"
+              onError={(e) => {
+                (e.target as HTMLImageElement).src = '/icon-512.png';
+              }}
+            />
           </div>
-          <div className="absolute -bottom-2 -right-2 bg-emerald-500 text-white p-1.5 rounded-full shadow-md">
-            <ShieldCheck className="w-5 h-5" />
+          <div className="absolute -bottom-2 -right-2 bg-gradient-to-r from-emerald-600 to-teal-600 text-white p-2 rounded-full shadow-lg border-2 border-white dark:border-zinc-900">
+            <ShieldCheck className="w-5 h-5 text-amber-300" />
           </div>
         </div>
 

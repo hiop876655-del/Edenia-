@@ -3,6 +3,7 @@
 
 import { initializeApp, getApps } from 'firebase/app';
 import {
+  initializeFirestore,
   getFirestore,
   doc,
   getDoc,
@@ -29,8 +30,18 @@ const app = getApps().length === 0 ? initializeApp({
   appId: config.appId
 }) : getApps()[0];
 
-// Firestore Instance bound to assigned databaseId
-export const firestore = getFirestore(app, config.firestoreDatabaseId || 'ai-studio-e8a11360-63f5-4c58-82ce-cfbccdea7c66');
+// Firestore Instance bound to assigned databaseId with auto-long-polling resilience
+export const firestore = (() => {
+  const dbId = config.firestoreDatabaseId || 'ai-studio-e8a11360-63f5-4c58-82ce-cfbccdea7c66';
+  try {
+    return initializeFirestore(app, {
+      experimentalAutoDetectLongPolling: true,
+      ignoreUndefinedProperties: true
+    }, dbId);
+  } catch {
+    return getFirestore(app, dbId);
+  }
+})();
 
 export interface MerchantRegistrationPayload {
   fullName: string;

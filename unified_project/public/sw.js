@@ -1,11 +1,15 @@
 // Service Worker for "ايدينيا - حِسبة" - 100% Offline Support
-const CACHE_NAME = 'idenia-hisba-v1';
+const CACHE_NAME = 'idenia-hisba-v2';
 const ASSETS_TO_CACHE = [
   '/',
   '/index.html',
   '/manifest.json',
-  '/icon-192.svg',
-  '/icon-512.svg'
+  '/icon-192.png',
+  '/icon-512.png',
+  '/apple-touch-icon.png',
+  '/favicon.png',
+  '/favicon.ico',
+  '/assets/idenia_hisba_logo.png'
 ];
 
 self.addEventListener('install', (event) => {

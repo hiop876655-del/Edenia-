@@ -81,8 +81,15 @@ export const Header: React.FC<HeaderProps> = ({
         {/* Brand & Shop Info */}
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 md:w-10 md:h-10 rounded-xl bg-gradient-to-tr from-[#1B5E20] to-[#2E7D32] flex items-center justify-center text-white font-black text-lg md:text-xl shadow-md shadow-emerald-800/20">
-              ح
+            <div className="w-10 h-10 md:w-11 md:h-11 rounded-xl overflow-hidden shadow-md shadow-emerald-950/25 border border-emerald-700/30 dark:border-emerald-600/40 bg-gradient-to-b from-[#0e2c21] to-[#081b14] flex items-center justify-center shrink-0 p-0.5 group">
+              <img
+                src="/assets/idenia_hisba_logo.png"
+                alt="ايدينيا - حِسبة"
+                className="w-full h-full object-cover rounded-[10px] transition-transform group-hover:scale-105 duration-200"
+                onError={(e) => {
+                  (e.target as HTMLImageElement).src = '/icon-192.png';
+                }}
+              />
             </div>
             <div>
               <div className="flex items-center gap-1.5">
