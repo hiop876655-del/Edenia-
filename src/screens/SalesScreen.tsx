@@ -16,12 +16,14 @@ import {
   RotateCcw,
   History,
   QrCode,
-  Package
+  Package,
+  Camera
 } from 'lucide-react';
 import { db } from '../services/db';
 import { Product, Customer, Sale, SaleItem, AppSettings } from '../types';
 import { SmartVoidModal } from '../components/SmartVoidModal';
 import { StationPairingCard } from '../components/StationPairingCard';
+import { BarcodeScannerModal } from '../components/BarcodeScannerModal';
 
 interface SalesScreenProps {
   onShowReceipt: (sale: Sale) => void;
@@ -58,6 +60,7 @@ export const SalesScreen: React.FC<SalesScreenProps> = ({ onShowReceipt }) => {
   const [activeTab, setActiveTab] = useState<'pos' | 'history'>('pos');
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [isPosScannerOpen, setIsPosScannerOpen] = useState<boolean>(false);
 
   const loadData = () => {
     setProducts(db.getProducts());
@@ -426,6 +429,16 @@ export const SalesScreen: React.FC<SalesScreenProps> = ({ onShowReceipt }) => {
                   مسح
                 </button>
               )}
+              <button
+                type="button"
+                onClick={() => setIsPosScannerOpen(true)}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-[#2E7D32] hover:bg-[#256628] text-white rounded-xl text-xs font-bold shrink-0 transition shadow-xs cursor-pointer active:scale-95"
+                title="مسح باركود المنتج بالكاميرا وإضافته للفاتورة فوراً"
+              >
+                <Camera className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">مسح بالكاميرا</span>
+                <span className="sm:hidden">مسح</span>
+              </button>
             </div>
 
             {/* Products Quick Grid */}
@@ -868,6 +881,16 @@ export const SalesScreen: React.FC<SalesScreenProps> = ({ onShowReceipt }) => {
             setErrorMessage(res.message);
             setTimeout(() => setErrorMessage(null), 3000);
           }
+        }}
+      />
+
+      {/* POS Camera Barcode Scanner Modal */}
+      <BarcodeScannerModal
+        isOpen={isPosScannerOpen}
+        onClose={() => setIsPosScannerOpen(false)}
+        title="مسح باركود المنتج لإضافته للفاتورة"
+        onScan={code => {
+          handleBarcodeDetected(code);
         }}
       />
     </div>

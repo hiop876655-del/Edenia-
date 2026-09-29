@@ -9,13 +9,15 @@ import {
   Plus,
   ArrowRight,
   Sparkles,
-  CheckCircle2
+  CheckCircle2,
+  Camera
 } from 'lucide-react';
 import { db } from '../services/db';
 import { Product, ProductUnit, AppSettings } from '../types';
 import { PRODUCT_UNITS } from '../data/tradeCategories';
 import { ConfirmModal } from '../components/ConfirmModal';
 import { BarcodeStickerModal } from '../components/BarcodeStickerModal';
+import { BarcodeScannerModal } from '../components/BarcodeScannerModal';
 
 interface ProductsScreenProps {
   editProductItem?: Product | null;
@@ -45,6 +47,8 @@ export const ProductsScreen: React.FC<ProductsScreenProps> = ({
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [deleteProductId, setDeleteProductId] = useState<string | null>(null);
   const [stickerProduct, setStickerProduct] = useState<Product | null>(null);
+  const [isScannerOpen, setIsScannerOpen] = useState<boolean>(false);
+  const [isSearchScannerOpen, setIsSearchScannerOpen] = useState<boolean>(false);
 
   const loadData = () => {
     setProducts(db.getProducts());
@@ -312,23 +316,44 @@ export const ProductsScreen: React.FC<ProductsScreenProps> = ({
                 <label className="text-xs font-bold text-gray-700 dark:text-gray-300">
                   الباركود (Barcode)
                 </label>
-                <button
-                  type="button"
-                  onClick={generateRandomBarcode}
-                  className="text-[11px] font-bold text-[#2E7D32] dark:text-[#66BB6A] hover:underline cursor-pointer"
-                >
-                  توليد باركود تلقائي
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsScannerOpen(true)}
+                    className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/60 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 px-2 py-0.5 rounded-lg border border-emerald-200 dark:border-emerald-800 transition cursor-pointer"
+                    title="فتح كاميرا الموبايل أو الجهاز لمسح باركود المنتج"
+                  >
+                    <Camera className="w-3.5 h-3.5" />
+                    <span>مسح بالكاميرا</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={generateRandomBarcode}
+                    className="text-[11px] font-bold text-[#2E7D32] dark:text-[#66BB6A] hover:underline cursor-pointer"
+                    title="توليد كود من 5 أرقام عشوائي"
+                  >
+                    توليد تلقائي
+                  </button>
+                </div>
               </div>
               <div className="relative">
                 <Barcode className="absolute right-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
                 <input
                   type="text"
-                  placeholder="أدخل الباركود أو امسحه بالماسح"
+                  placeholder="أدخل الباركود أو امسحه بالماسح / الكاميرا"
                   value={barcode}
                   onChange={e => setBarcode(e.target.value)}
-                  className="w-full pr-10 pl-3.5 py-2 text-xs font-mono rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-zinc-900 text-gray-900 dark:text-white"
+                  className="w-full pr-10 pl-24 py-2 text-xs font-mono rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-zinc-900 text-gray-900 dark:text-white"
                 />
+                <button
+                  type="button"
+                  onClick={() => setIsScannerOpen(true)}
+                  className="absolute left-1.5 top-1/2 -translate-y-1/2 px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[11px] font-bold flex items-center gap-1 shadow-xs transition active:scale-95 cursor-pointer"
+                  title="مسح الباركود بالكاميرا الآن"
+                >
+                  <Camera className="w-3.5 h-3.5" />
+                  <span>مسح</span>
+                </button>
               </div>
             </div>
 
@@ -352,11 +377,19 @@ export const ProductsScreen: React.FC<ProductsScreenProps> = ({
               <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
               <input
                 type="text"
-                placeholder="بحث..."
+                placeholder="بحث بالاسم أو الباركود..."
                 value={search}
                 onChange={e => setSearch(e.target.value)}
-                className="w-full pr-8 pl-3 py-1.5 text-xs rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-zinc-900 text-gray-900 dark:text-white"
+                className="w-full pr-8 pl-9 py-1.5 text-xs rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-zinc-900 text-gray-900 dark:text-white"
               />
+              <button
+                type="button"
+                onClick={() => setIsSearchScannerOpen(true)}
+                className="absolute left-1.5 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-emerald-600 dark:hover:text-emerald-400 transition cursor-pointer"
+                title="مسح باركود بالماسح للبحث عنه فوراً"
+              >
+                <Camera className="w-3.5 h-3.5" />
+              </button>
             </div>
           </div>
 
@@ -452,6 +485,28 @@ export const ProductsScreen: React.FC<ProductsScreenProps> = ({
         settings={settings}
         isOpen={!!stickerProduct}
         onClose={() => setStickerProduct(null)}
+      />
+
+      {/* Barcode Camera Scanner for Product Form */}
+      <BarcodeScannerModal
+        isOpen={isScannerOpen}
+        onClose={() => setIsScannerOpen(false)}
+        title="مسح باركود المنتج بالكاميرا"
+        onScan={code => {
+          setBarcode(code);
+          setSuccessMsg(`تم التقاط باركود الصنف بنجاح: ${code}`);
+          setTimeout(() => setSuccessMsg(null), 3500);
+        }}
+      />
+
+      {/* Barcode Camera Scanner for Product Search */}
+      <BarcodeScannerModal
+        isOpen={isSearchScannerOpen}
+        onClose={() => setIsSearchScannerOpen(false)}
+        title="مسح باركود للبحث عن المنتج"
+        onScan={code => {
+          setSearch(code);
+        }}
       />
     </div>
   );
