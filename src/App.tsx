@@ -35,7 +35,7 @@ import { CashierCameraScreen } from './screens/CashierCameraScreen';
 import { CameraUpgradeModal } from './components/CameraUpgradeModal';
 import { OnlineStatusGuard } from './components/OnlineStatusGuard';
 import { cloudDatabaseService } from './services/cloudDatabase';
-import { subscribeToMerchantDataSnapshotInFirebase } from './services/firebase';
+import { subscribeToMerchantDataSnapshotInFirebase, subscribeToMerchantRealtimeEvents } from './services/firebase';
 import { getDeviceId } from './services/device';
 
 export function App() {
@@ -291,9 +291,13 @@ export function App() {
 
     // Attach real-time Firestore cross-device snapshot listener (Instant Phone <-> PC Sync)
     let unsubscribeDataSync = () => {};
+    let unsubscribeEventSync = () => {};
+
     if (user?.phone) {
       try {
         const myDeviceId = getDeviceId();
+        
+        // 1. Snapshot Listener
         unsubscribeDataSync = subscribeToMerchantDataSnapshotInFirebase(user.phone, ({ data, updatedAt, updatedByDeviceId }) => {
           if (updatedByDeviceId && updatedByDeviceId === myDeviceId) {
             // Initiated locally on this device fingerprint
@@ -306,6 +310,23 @@ export function App() {
               window.dispatchEvent(new CustomEvent('idenia_db_changed', { detail: { timestamp: Date.now(), fromRemote: true } }));
             }
           }
+        });
+
+        // 2. Ultra-Fast Sub-50ms Delta Event Channel Listener
+        unsubscribeEventSync = subscribeToMerchantRealtimeEvents(user.phone, (event) => {
+          if (event.updatedByDeviceId === myDeviceId) return;
+          if (event.eventType === 'INVOICE_VOIDED' && event.entityId) {
+            db.recordTombstone(event.entityId, 'sale');
+          } else if (event.eventType === 'PRODUCT_DELETED' && event.entityId) {
+            db.recordTombstone(event.entityId, 'product');
+          } else if (event.eventType === 'CUSTOMER_DELETED' && event.entityId) {
+            db.recordTombstone(event.entityId, 'customer');
+          }
+          
+          // Trigger immediate cloud pull & UI refresh
+          cloudDatabaseService.restoreMerchantDatabaseForDevice(user.phone).then(() => {
+            window.dispatchEvent(new CustomEvent('idenia_db_changed', { detail: { timestamp: Date.now(), fromDeltaEvent: true } }));
+          }).catch(() => {});
         });
       } catch (err) {
         console.warn('Realtime data sync listener setup error:', err);
@@ -339,6 +360,7 @@ export function App() {
     return () => {
       unsubscribeRealtime();
       unsubscribeDataSync();
+      unsubscribeEventSync();
       localBc?.close();
       clearInterval(interval);
       clearInterval(dataSyncInterval);

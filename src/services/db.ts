@@ -24,7 +24,8 @@ const STORAGE_KEYS = {
   SETTINGS: 'idenia_hisba_settings_v1',
   USER: 'idenia_hisba_user_v1',
   LICENSE: 'idenia_hisba_license_v1',
-  LAST_TIME_ANCHOR: 'idenia_hisba_time_anchor_v1'
+  LAST_TIME_ANCHOR: 'idenia_hisba_time_anchor_v1',
+  DELETED_RECORDS: 'idenia_hisba_deleted_records_v1'
 };
 
 const DEFAULT_SETTINGS: AppSettings = {
@@ -66,23 +67,32 @@ class LocalDatabase {
     saveEncryptedItem(this.getScopedKey(key, explicitPhone), value);
   }
 
-  public triggerCloudSync() {
+  public triggerCloudSync(eventType?: string, entityId?: string) {
     this.markLocalWrite();
     if (typeof window !== 'undefined') {
       try {
-        window.dispatchEvent(new CustomEvent('idenia_db_changed', { detail: { timestamp: Date.now() } }));
+        window.dispatchEvent(new CustomEvent('idenia_db_changed', { detail: { timestamp: Date.now(), eventType, entityId } }));
         if (typeof BroadcastChannel !== 'undefined') {
           const bc = new BroadcastChannel('idenia_local_db_channel');
-          bc.postMessage({ type: 'DB_CHANGED', timestamp: Date.now() });
+          bc.postMessage({ type: 'DB_CHANGED', timestamp: Date.now(), eventType, entityId });
           bc.close();
         }
       } catch {}
 
-      // Fast-trigger instant cloud stream push (non-blocking)
+      // Fast-trigger instant cloud stream push & delta event (non-blocking)
       try {
         import('./cloudDatabase').then(m => {
           m.cloudDatabaseService.syncAllDataToCloud().catch(() => {});
         }).catch(() => {});
+
+        if (eventType) {
+          import('./firebase').then(fb => {
+            const userPhone = this.getUser()?.phone;
+            if (userPhone) {
+              fb.publishMerchantRealtimeEvent(userPhone, { eventType, entityId }).catch(() => {});
+            }
+          }).catch(() => {});
+        }
       } catch {}
     }
   }
@@ -147,7 +157,7 @@ class LocalDatabase {
             reason: 'تعديل يدوي لكمية المخزون'
           });
         }
-        this.triggerCloudSync();
+        this.triggerCloudSync('PRODUCT_MUTATED', updated.id);
         return updated;
       }
     }
@@ -180,16 +190,35 @@ class LocalDatabase {
       reason: 'إضافة صنف جديد للمخزن'
     });
 
-    this.triggerCloudSync();
+    this.triggerCloudSync('PRODUCT_MUTATED', newProd.id);
     return newProd;
   }
 
+  public getDeletedRecords(): { id: string; type: string; deletedAt: number }[] {
+    return this.get<{ id: string; type: string; deletedAt: number }[]>(STORAGE_KEYS.DELETED_RECORDS, []);
+  }
+
+  public recordTombstone(id: string, type: 'sale' | 'product' | 'customer' | 'debt') {
+    if (!id) return;
+    const list = this.getDeletedRecords();
+    const existingIdx = list.findIndex(r => r.id === id);
+    const record = { id, type, deletedAt: Date.now() };
+    if (existingIdx !== -1) {
+      list[existingIdx] = record;
+    } else {
+      list.unshift(record);
+    }
+    if (list.length > 1000) list.pop();
+    this.set(STORAGE_KEYS.DELETED_RECORDS, list);
+  }
+
   public deleteProduct(id: string): boolean {
+    this.recordTombstone(id, 'product');
     const products = this.getProducts();
     const filtered = products.filter(p => p.id !== id);
     if (filtered.length !== products.length) {
       this.set(STORAGE_KEYS.PRODUCTS, filtered);
-      this.triggerCloudSync();
+      this.triggerCloudSync('PRODUCT_DELETED', id);
       return true;
     }
     return false;
@@ -406,7 +435,7 @@ class LocalDatabase {
     const sales = this.getSales();
     sales.unshift(newSale);
     this.set(STORAGE_KEYS.SALES, sales);
-    this.triggerCloudSync();
+    this.triggerCloudSync('SALE_CREATED', newSale.id);
 
     return { success: true, sale: newSale };
   }
@@ -475,6 +504,7 @@ class LocalDatabase {
     const currentCustDebt = updatedCustomer ? updatedCustomer.remaining_debt : 0;
 
     if (mode === 'all') {
+      this.recordTombstone(saleId, 'sale');
       sales.splice(saleIndex, 1);
     } else if (mode === 'items_only') {
       targetSale.void_status = 'items_voided';
@@ -492,7 +522,7 @@ class LocalDatabase {
       targetSale.final_balance = currentCustDebt;
     }
     this.set(STORAGE_KEYS.SALES, sales);
-    this.triggerCloudSync();
+    this.triggerCloudSync('INVOICE_VOIDED', saleId);
 
     let message = `تم إلغاء الفاتورة ${targetSale.invoice_number} وإعادة جميع الأصناف المباعة إلى رصيد المخزن بنجاح.`;
     if (mode === 'items_only') {
@@ -614,6 +644,7 @@ class LocalDatabase {
   }
 
   public deleteCustomer(id: string): boolean {
+    this.recordTombstone(id, 'customer');
     const customers = this.getCustomers();
     const filtered = customers.filter(c => c.id !== id);
     if (filtered.length !== customers.length) {
@@ -967,27 +998,47 @@ class LocalDatabase {
     try {
       let hasChanges = false;
 
+      // 0. TOMBSTONES RECONCILIATION
+      const localTombs = this.getDeletedRecords();
+      const remoteTombs = Array.isArray(data.deleted_records) ? data.deleted_records : [];
+      const tombMap = new Map<string, number>();
+
+      for (const t of localTombs) if (t && t.id) tombMap.set(t.id, Math.max(tombMap.get(t.id) || 0, t.deletedAt || 0));
+      for (const rt of remoteTombs) if (rt && rt.id) tombMap.set(rt.id, Math.max(tombMap.get(rt.id) || 0, rt.deletedAt || 0));
+
+      const mergedTombs = Array.from(tombMap.entries()).map(([id, deletedAt]) => ({
+        id,
+        type: 'deleted',
+        deletedAt
+      }));
+      this.set(STORAGE_KEYS.DELETED_RECORDS, mergedTombs);
+
       // 1. SMART PRODUCTS MERGE
       if (Array.isArray(data.products)) {
         const localProducts = this.getProducts();
         const productMap = new Map<string, Product>();
 
-        // Seed with local products
+        // Seed with local products (excluding tombstones)
         for (const p of localProducts) {
-          if (p && p.id) productMap.set(p.id, p);
+          if (!p || !p.id) continue;
+          const pTime = new Date(p.updated_at || p.created_at || 0).getTime();
+          if (tombMap.has(p.id) && tombMap.get(p.id)! >= pTime) continue;
+          productMap.set(p.id, p);
         }
 
         // Merge remote products
         for (const rp of data.products as Product[]) {
           if (!rp || !rp.id) continue;
+          const rpTime = new Date(rp.updated_at || rp.created_at || 0).getTime();
+          if (tombMap.has(rp.id) && tombMap.get(rp.id)! >= rpTime) continue;
+
           const existing = productMap.get(rp.id);
           if (!existing) {
             productMap.set(rp.id, rp);
             hasChanges = true;
           } else {
-            const remoteTime = new Date(rp.updated_at || rp.created_at || 0).getTime();
             const localTime = new Date(existing.updated_at || existing.created_at || 0).getTime();
-            if (remoteTime >= localTime) {
+            if (rpTime >= localTime) {
               productMap.set(rp.id, rp);
               hasChanges = true;
             }
@@ -996,17 +1047,23 @@ class LocalDatabase {
         this.set(STORAGE_KEYS.PRODUCTS, Array.from(productMap.values()));
       }
 
-      // 2. SMART SALES MERGE (Union of all cashier invoices)
+      // 2. SMART SALES MERGE (Excluding Tombstoned/Deleted Invoices)
       if (Array.isArray(data.sales)) {
         const localSales = this.getSales();
         const salesMap = new Map<string, Sale>();
 
         for (const s of localSales) {
-          if (s && s.id) salesMap.set(s.id, s);
+          if (!s || !s.id) continue;
+          const sTime = new Date(s.created_at || 0).getTime();
+          if (tombMap.has(s.id) && tombMap.get(s.id)! >= sTime) continue;
+          salesMap.set(s.id, s);
         }
 
         for (const rs of data.sales as Sale[]) {
           if (!rs || !rs.id) continue;
+          const rsTime = new Date(rs.created_at || 0).getTime();
+          if (tombMap.has(rs.id) && tombMap.get(rs.id)! >= rsTime) continue;
+
           const existing = salesMap.get(rs.id);
           if (!existing) {
             salesMap.set(rs.id, rs);
@@ -1031,19 +1088,24 @@ class LocalDatabase {
         const custMap = new Map<string, Customer>();
 
         for (const c of localCustomers) {
-          if (c && c.id) custMap.set(c.id, c);
+          if (!c || !c.id) continue;
+          const cTime = new Date(c.updated_at || c.created_at || 0).getTime();
+          if (tombMap.has(c.id) && tombMap.get(c.id)! >= cTime) continue;
+          custMap.set(c.id, c);
         }
 
         for (const rc of data.customers as Customer[]) {
           if (!rc || !rc.id) continue;
+          const rcTime = new Date(rc.updated_at || rc.created_at || 0).getTime();
+          if (tombMap.has(rc.id) && tombMap.get(rc.id)! >= rcTime) continue;
+
           const existing = custMap.get(rc.id);
           if (!existing) {
             custMap.set(rc.id, rc);
             hasChanges = true;
           } else {
-            const remoteTime = new Date(rc.updated_at || rc.created_at || 0).getTime();
             const localTime = new Date(existing.updated_at || existing.created_at || 0).getTime();
-            if (remoteTime >= localTime) {
+            if (rcTime >= localTime) {
               custMap.set(rc.id, rc);
               hasChanges = true;
             }

@@ -275,6 +275,8 @@ export const cloudDatabaseService = {
         }
       }
 
+      const deleted_records = db.getDeletedRecords();
+
       const snapshotPayload = {
         updatedAt: new Date().toISOString(),
         timestamp: Date.now(),
@@ -286,6 +288,7 @@ export const cloudDatabaseService = {
         debts,
         debt_payments: debtPayments,
         stock_movements: stockMovements,
+        deleted_records,
         settings
       };
 

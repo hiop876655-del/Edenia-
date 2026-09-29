@@ -749,6 +749,66 @@ export function subscribeToMerchantDataSnapshotInFirebase(
   }
 }
 
+// 14.4. High-Speed Delta Stream Event Broadcaster (Sub-50ms Granular Live Channel)
+export async function publishMerchantRealtimeEvent(
+  phone: string,
+  event: {
+    eventType: string; // 'SALE_CREATED' | 'INVOICE_VOIDED' | 'PRODUCT_MUTATED' | 'PRODUCT_DELETED' | 'CUSTOMER_MUTATED' | 'FULL_SYNC'
+    entityId?: string;
+    payload?: any;
+  }
+) {
+  const cleanPhone = normalizePhone(phone);
+  if (!cleanPhone) return;
+
+  try {
+    const deviceId = getDeviceId();
+    const eventDocRef = doc(firestore, 'merchants', `m_${cleanPhone}`, 'live_data', 'stream_event');
+    const fullEvent = {
+      ...event,
+      updatedAt: Date.now(),
+      isoDate: new Date().toISOString(),
+      merchantPhone: cleanPhone,
+      updatedByDeviceId: deviceId
+    };
+
+    await setDoc(eventDocRef, fullEvent);
+  } catch (err) {
+    console.warn('Error publishing live realtime event:', err);
+  }
+}
+
+export function subscribeToMerchantRealtimeEvents(
+  phone: string,
+  onEvent: (event: { eventType: string; entityId?: string; payload?: any; updatedAt: number; updatedByDeviceId?: string }) => void
+): () => void {
+  const cleanPhone = normalizePhone(phone);
+  if (!cleanPhone) return () => {};
+
+  try {
+    const eventDocRef = doc(firestore, 'merchants', `m_${cleanPhone}`, 'live_data', 'stream_event');
+    const unsubscribe = onSnapshot(
+      eventDocRef,
+      { includeMetadataChanges: false },
+      (docSnap) => {
+        if (!docSnap.exists()) return;
+        const data = docSnap.data() as any;
+        if (data && data.eventType) {
+          onEvent(data);
+        }
+      },
+      (err) => {
+        console.warn('Realtime event stream error:', err);
+      }
+    );
+
+    return unsubscribe;
+  } catch (err) {
+    console.warn('Could not subscribe to realtime event stream:', err);
+    return () => {};
+  }
+}
+
 // 15. Admin: Save Database Tutorial Video & Link Settings
 export async function saveDatabaseTutorialSettingsInFirebase(settings: Partial<DatabaseTutorialSettingsRecord>) {
   const isOnline = await checkRealInternetConnection(2500);
