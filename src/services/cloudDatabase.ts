@@ -202,16 +202,14 @@ export const cloudDatabaseService = {
     return null;
   },
 
-  // 7. Sync All Local Data to Central Cloud & Merchant DB
+  // 7. Sync All Local Data to Central Cloud & Merchant DB (Instant Live Broadcast)
   async syncAllDataToCloud(config?: MerchantCloudConfig | null): Promise<boolean> {
     const activeConfig = config || this.getLocalConfig();
     const currentUser = db.getUser();
     const targetPhone = activeConfig?.merchantPhone || currentUser?.phone;
 
     if (!targetPhone) return false;
-
-    const isOnline = await checkRealInternetConnection(2000);
-    if (!isOnline) return false;
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) return false;
 
     try {
       // Gather local data snapshots
@@ -237,8 +235,8 @@ export const cloudDatabaseService = {
         settings
       };
 
-      // 1. Save snapshot to central Firebase database for merchant phone
-      await saveMerchantDataSnapshotInFirebase(targetPhone, snapshotPayload);
+      // 1. Save snapshot to central live stream Firestore channel for merchant phone
+      saveMerchantDataSnapshotInFirebase(targetPhone, snapshotPayload).catch(() => {});
 
       // 2. Record timestamp if custom config exists
       if (activeConfig) {

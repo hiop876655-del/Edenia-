@@ -276,6 +276,19 @@ export function App() {
       }
     }
 
+    // Attach local BroadcastChannel listener (Instant Multi-Tab / Multi-Window Sync)
+    let localBc: BroadcastChannel | null = null;
+    if (typeof BroadcastChannel !== 'undefined') {
+      try {
+        localBc = new BroadcastChannel('idenia_local_db_channel');
+        localBc.onmessage = (e) => {
+          if (e.data && e.data.type === 'DB_CHANGED') {
+            window.dispatchEvent(new CustomEvent('idenia_db_changed', { detail: { timestamp: e.data.timestamp || Date.now(), fromLocalTab: true } }));
+          }
+        };
+      } catch {}
+    }
+
     // Attach real-time Firestore cross-device snapshot listener (Instant Phone <-> PC Sync)
     let unsubscribeDataSync = () => {};
     if (user?.phone) {
@@ -283,7 +296,7 @@ export function App() {
         const myDeviceId = getDeviceId();
         unsubscribeDataSync = subscribeToMerchantDataSnapshotInFirebase(user.phone, ({ data, updatedAt, updatedByDeviceId }) => {
           if (updatedByDeviceId && updatedByDeviceId === myDeviceId) {
-            // Initiated locally, already saved locally
+            // Initiated locally on this device fingerprint
             return;
           }
           if (data) {
@@ -326,6 +339,7 @@ export function App() {
     return () => {
       unsubscribeRealtime();
       unsubscribeDataSync();
+      localBc?.close();
       clearInterval(interval);
       clearInterval(dataSyncInterval);
       window.removeEventListener('online', handleOnline);

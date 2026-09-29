@@ -77,13 +77,12 @@ class LocalDatabase {
         }
       } catch {}
 
-      setTimeout(() => {
-        try {
-          import('./cloudDatabase').then(m => {
-            m.cloudDatabaseService.syncAllDataToCloud().catch(() => {});
-          }).catch(() => {});
-        } catch {}
-      }, 20);
+      // Fast-trigger instant cloud stream push (non-blocking)
+      try {
+        import('./cloudDatabase').then(m => {
+          m.cloudDatabaseService.syncAllDataToCloud().catch(() => {});
+        }).catch(() => {});
+      } catch {}
     }
   }
 
@@ -956,54 +955,139 @@ class LocalDatabase {
     }
   }
 
-  private lastLocalWriteTimestamp: number = Date.now();
+  private lastLocalWriteTimestamp: number = 0;
 
   public markLocalWrite() {
     this.lastLocalWriteTimestamp = Date.now();
   }
 
   public restoreStoreData(data: any, remoteTimestamp?: number): boolean {
-    if (!data) return false;
+    if (!data || typeof data !== 'object') return false;
     try {
-      // If remote timestamp is older than recent local write (within last 3 seconds), keep local state
-      if (remoteTimestamp && (Date.now() - this.lastLocalWriteTimestamp < 3000) && remoteTimestamp < this.lastLocalWriteTimestamp) {
-        return false;
-      }
+      let hasChanges = false;
 
-      const currentProducts = this.getProducts();
+      // 1. SMART PRODUCTS MERGE
       if (Array.isArray(data.products)) {
-        // Protect against accidental wipe: if local has products but remote is empty and was older, keep local
-        if (data.products.length > 0 || currentProducts.length === 0) {
-          this.set(STORAGE_KEYS.PRODUCTS, data.products);
+        const localProducts = this.getProducts();
+        const productMap = new Map<string, Product>();
+
+        // Seed with local products
+        for (const p of localProducts) {
+          if (p && p.id) productMap.set(p.id, p);
         }
+
+        // Merge remote products
+        for (const rp of data.products as Product[]) {
+          if (!rp || !rp.id) continue;
+          const existing = productMap.get(rp.id);
+          if (!existing) {
+            productMap.set(rp.id, rp);
+            hasChanges = true;
+          } else {
+            const remoteTime = new Date(rp.updated_at || rp.created_at || 0).getTime();
+            const localTime = new Date(existing.updated_at || existing.created_at || 0).getTime();
+            if (remoteTime >= localTime) {
+              productMap.set(rp.id, rp);
+              hasChanges = true;
+            }
+          }
+        }
+        this.set(STORAGE_KEYS.PRODUCTS, Array.from(productMap.values()));
       }
 
-      const currentSales = this.getSales();
+      // 2. SMART SALES MERGE (Union of all cashier invoices)
       if (Array.isArray(data.sales)) {
-        if (data.sales.length > 0 || currentSales.length === 0) {
-          this.set(STORAGE_KEYS.SALES, data.sales);
+        const localSales = this.getSales();
+        const salesMap = new Map<string, Sale>();
+
+        for (const s of localSales) {
+          if (s && s.id) salesMap.set(s.id, s);
         }
+
+        for (const rs of data.sales as Sale[]) {
+          if (!rs || !rs.id) continue;
+          const existing = salesMap.get(rs.id);
+          if (!existing) {
+            salesMap.set(rs.id, rs);
+            hasChanges = true;
+          } else if (rs.void_status === 'voided' && existing.void_status !== 'voided') {
+            salesMap.set(rs.id, rs);
+            hasChanges = true;
+          }
+        }
+
+        const mergedSales = Array.from(salesMap.values()).sort((a, b) => {
+          const timeA = new Date(a.created_at || 0).getTime();
+          const timeB = new Date(b.created_at || 0).getTime();
+          return timeB - timeA;
+        });
+        this.set(STORAGE_KEYS.SALES, mergedSales);
       }
 
-      const currentCustomers = this.getCustomers();
+      // 3. SMART CUSTOMERS MERGE
       if (Array.isArray(data.customers)) {
-        if (data.customers.length > 0 || currentCustomers.length === 0) {
-          this.set(STORAGE_KEYS.CUSTOMERS, data.customers);
+        const localCustomers = this.getCustomers();
+        const custMap = new Map<string, Customer>();
+
+        for (const c of localCustomers) {
+          if (c && c.id) custMap.set(c.id, c);
         }
+
+        for (const rc of data.customers as Customer[]) {
+          if (!rc || !rc.id) continue;
+          const existing = custMap.get(rc.id);
+          if (!existing) {
+            custMap.set(rc.id, rc);
+            hasChanges = true;
+          } else {
+            const remoteTime = new Date(rc.updated_at || rc.created_at || 0).getTime();
+            const localTime = new Date(existing.updated_at || existing.created_at || 0).getTime();
+            if (remoteTime >= localTime) {
+              custMap.set(rc.id, rc);
+              hasChanges = true;
+            }
+          }
+        }
+        this.set(STORAGE_KEYS.CUSTOMERS, Array.from(custMap.values()));
       }
 
+      // 4. DEBTS & DEBT PAYMENTS MERGE
       if (Array.isArray(data.debts)) {
-        this.set(STORAGE_KEYS.DEBTS, data.debts);
+        const localDebts = this.getDebts();
+        const debtMap = new Map<string, Debt>();
+        for (const d of localDebts) if (d && d.id) debtMap.set(d.id, d);
+        for (const rd of data.debts as Debt[]) if (rd && rd.id) debtMap.set(rd.id, rd);
+        this.set(STORAGE_KEYS.DEBTS, Array.from(debtMap.values()));
       }
+
       if (Array.isArray(data.debt_payments)) {
-        this.set(STORAGE_KEYS.DEBT_PAYMENTS, data.debt_payments);
+        const localPayments = this.getDebtPayments();
+        const payMap = new Map<string, DebtPayment>();
+        for (const p of localPayments) if (p && p.id) payMap.set(p.id, p);
+        for (const rp of data.debt_payments as DebtPayment[]) if (rp && rp.id) payMap.set(rp.id, rp);
+        this.set(STORAGE_KEYS.DEBT_PAYMENTS, Array.from(payMap.values()));
       }
+
+      // 5. STOCK MOVEMENTS MERGE
       if (Array.isArray(data.stock_movements)) {
-        this.set(STORAGE_KEYS.STOCK_MOVEMENTS, data.stock_movements);
+        const localMovements = this.getStockMovements();
+        const moveMap = new Map<string, StockMovement>();
+        for (const m of localMovements) if (m && m.id) moveMap.set(m.id, m);
+        for (const rm of data.stock_movements as StockMovement[]) if (rm && rm.id) moveMap.set(rm.id, rm);
+        const mergedMovements = Array.from(moveMap.values()).sort((a, b) => {
+          const timeA = new Date(a.created_at || 0).getTime();
+          const timeB = new Date(b.created_at || 0).getTime();
+          return timeB - timeA;
+        });
+        this.set(STORAGE_KEYS.STOCK_MOVEMENTS, mergedMovements);
       }
+
+      // 6. SETTINGS MERGE
       if (data.settings && typeof data.settings === 'object') {
-        this.set(STORAGE_KEYS.SETTINGS, data.settings);
+        const currentSettings = this.getSettings();
+        this.set(STORAGE_KEYS.SETTINGS, { ...currentSettings, ...data.settings });
       }
+
       return true;
     } catch (err) {
       console.warn('Error restoring store data:', err);
