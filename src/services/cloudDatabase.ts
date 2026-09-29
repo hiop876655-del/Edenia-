@@ -205,7 +205,10 @@ export const cloudDatabaseService = {
   // 7. Sync All Local Data to Central Cloud & Merchant DB
   async syncAllDataToCloud(config?: MerchantCloudConfig | null): Promise<boolean> {
     const activeConfig = config || this.getLocalConfig();
-    if (!activeConfig || !activeConfig.isConnected) return false;
+    const currentUser = db.getUser();
+    const targetPhone = activeConfig?.merchantPhone || currentUser?.phone;
+
+    if (!targetPhone) return false;
 
     const isOnline = await checkRealInternetConnection(2000);
     if (!isOnline) return false;
@@ -223,8 +226,8 @@ export const cloudDatabaseService = {
       const snapshotPayload = {
         updatedAt: new Date().toISOString(),
         timestamp: Date.now(),
-        shopName: activeConfig.merchantShopName || settings.shop_name,
-        merchantPhone: activeConfig.merchantPhone,
+        shopName: activeConfig?.merchantShopName || currentUser?.shopName || settings.shop_name,
+        merchantPhone: targetPhone,
         products,
         sales,
         customers,
@@ -235,13 +238,13 @@ export const cloudDatabaseService = {
       };
 
       // 1. Save snapshot to central Firebase database for merchant phone
-      if (activeConfig.merchantPhone) {
-        await saveMerchantDataSnapshotInFirebase(activeConfig.merchantPhone, snapshotPayload);
-      }
+      await saveMerchantDataSnapshotInFirebase(targetPhone, snapshotPayload);
 
-      // 2. Record timestamp
-      activeConfig.lastSyncedAt = Date.now();
-      this.saveLocalConfig(activeConfig);
+      // 2. Record timestamp if custom config exists
+      if (activeConfig) {
+        activeConfig.lastSyncedAt = Date.now();
+        this.saveLocalConfig(activeConfig);
+      }
       return true;
     } catch (err) {
       console.warn('Sync error:', err);

@@ -33,7 +33,10 @@ import { AdminDashboardScreen } from './screens/AdminDashboardScreen';
 import { CloudDatabaseSetupScreen } from './screens/CloudDatabaseSetupScreen';
 import { CashierCameraScreen } from './screens/CashierCameraScreen';
 import { CameraUpgradeModal } from './components/CameraUpgradeModal';
+import { OnlineStatusGuard } from './components/OnlineStatusGuard';
 import { cloudDatabaseService } from './services/cloudDatabase';
+import { subscribeToMerchantDataSnapshotInFirebase } from './services/firebase';
+import { getDeviceId } from './services/device';
 
 export function App() {
   const [currentScreen, setCurrentScreen] = useState<ScreenType>('splash');
@@ -273,6 +276,27 @@ export function App() {
       }
     }
 
+    // Attach real-time Firestore cross-device snapshot listener (Instant Phone <-> PC Sync)
+    let unsubscribeDataSync = () => {};
+    if (user?.phone) {
+      try {
+        const myDeviceId = getDeviceId();
+        unsubscribeDataSync = subscribeToMerchantDataSnapshotInFirebase(user.phone, ({ data, updatedByDeviceId }) => {
+          if (updatedByDeviceId && updatedByDeviceId === myDeviceId) {
+            // Initiated locally, already up to date
+            return;
+          }
+          if (data) {
+            // Remote update arrived from another device -> update local store and trigger UI refresh!
+            db.restoreStoreData(data);
+            window.dispatchEvent(new CustomEvent('idenia_db_changed', { detail: { timestamp: Date.now(), fromRemote: true } }));
+          }
+        });
+      } catch (err) {
+        console.warn('Realtime data sync listener setup error:', err);
+      }
+    }
+
     // Sync merchant business data to cloud
     const syncMerchantData = () => {
       if (user?.phone) {
@@ -287,8 +311,8 @@ export function App() {
       syncCloudStatus();
     }, 10000);
 
-    // Sync business data every 60 seconds
-    const dataSyncInterval = setInterval(syncMerchantData, 60000);
+    // Sync business data periodically
+    const dataSyncInterval = setInterval(syncMerchantData, 30000);
 
     // Re-check immediately when browser/device connects to internet
     const handleOnline = () => {
@@ -299,6 +323,7 @@ export function App() {
 
     return () => {
       unsubscribeRealtime();
+      unsubscribeDataSync();
       clearInterval(interval);
       clearInterval(dataSyncInterval);
       window.removeEventListener('online', handleOnline);
@@ -632,73 +657,75 @@ export function App() {
   ].includes(currentScreen);
 
   return (
-    <div className={`min-h-screen bg-[#F8F9FA] dark:bg-[#121212] text-[#212121] dark:text-gray-100 font-sans ${isDarkMode ? 'dark' : ''}`} dir="rtl">
-      {!isAuthOrSplash && (
-        <Header
-          currentScreen={currentScreen}
-          user={user}
-          license={license}
-          isDarkMode={isDarkMode}
-          onToggleTheme={toggleTheme}
-          onNavigate={setCurrentScreen}
-          onLogout={handleLogout}
-        />
-      )}
-
-      <div className="flex h-full">
+    <OnlineStatusGuard>
+      <div className={`min-h-screen bg-[#F8F9FA] dark:bg-[#121212] text-[#212121] dark:text-gray-100 font-sans ${isDarkMode ? 'dark' : ''}`} dir="rtl">
         {!isAuthOrSplash && (
-          <div className="hidden md:block">
-            <Sidebar
-              currentScreen={currentScreen}
-              onNavigate={setCurrentScreen}
-              user={user}
-              onOpenUpgradeModal={() => setIsCameraUpgradeModalOpen(true)}
-            />
-          </div>
+          <Header
+            currentScreen={currentScreen}
+            user={user}
+            license={license}
+            isDarkMode={isDarkMode}
+            onToggleTheme={toggleTheme}
+            onNavigate={setCurrentScreen}
+            onLogout={handleLogout}
+          />
         )}
 
-        <main className={`flex-1 overflow-y-auto ${!isAuthOrSplash ? 'pb-20 md:pb-6' : ''}`}>
-          {renderCurrentScreen()}
-        </main>
-      </div>
+        <div className="flex h-full">
+          {!isAuthOrSplash && (
+            <div className="hidden md:block">
+              <Sidebar
+                currentScreen={currentScreen}
+                onNavigate={setCurrentScreen}
+                user={user}
+                onOpenUpgradeModal={() => setIsCameraUpgradeModalOpen(true)}
+              />
+            </div>
+          )}
 
-      {!isAuthOrSplash && (
-        <BottomNav
-          currentScreen={currentScreen}
-          onNavigate={setCurrentScreen}
-          onOpenMore={() => setIsMobileMoreOpen(true)}
+          <main className={`flex-1 overflow-y-auto ${!isAuthOrSplash ? 'pb-20 md:pb-6' : ''}`}>
+            {renderCurrentScreen()}
+          </main>
+        </div>
+
+        {!isAuthOrSplash && (
+          <BottomNav
+            currentScreen={currentScreen}
+            onNavigate={setCurrentScreen}
+            onOpenMore={() => setIsMobileMoreOpen(true)}
+          />
+        )}
+
+        {/* Global Modals */}
+        <ThermalReceiptModal
+          sale={viewingReceiptSale}
+          settings={db.getSettings()}
+          isOpen={!!viewingReceiptSale}
+          onClose={() => setViewingReceiptSale(null)}
+          onVoid={(saleId) => {
+            db.voidInvoice(saleId);
+            setViewingReceiptSale(null);
+          }}
         />
-      )}
 
-      {/* Global Modals */}
-      <ThermalReceiptModal
-        sale={viewingReceiptSale}
-        settings={db.getSettings()}
-        isOpen={!!viewingReceiptSale}
-        onClose={() => setViewingReceiptSale(null)}
-        onVoid={(saleId) => {
-          db.voidInvoice(saleId);
-          setViewingReceiptSale(null);
-        }}
-      />
+        <MobileMoreDrawer
+          isOpen={isMobileMoreOpen}
+          onClose={() => setIsMobileMoreOpen(false)}
+          onNavigate={setCurrentScreen}
+          isDarkMode={isDarkMode}
+          onToggleTheme={toggleTheme}
+          onLogout={handleLogout}
+          user={user}
+          onOpenUpgradeModal={() => setIsCameraUpgradeModalOpen(true)}
+        />
 
-      <MobileMoreDrawer
-        isOpen={isMobileMoreOpen}
-        onClose={() => setIsMobileMoreOpen(false)}
-        onNavigate={setCurrentScreen}
-        isDarkMode={isDarkMode}
-        onToggleTheme={toggleTheme}
-        onLogout={handleLogout}
-        user={user}
-        onOpenUpgradeModal={() => setIsCameraUpgradeModalOpen(true)}
-      />
-
-      <CameraUpgradeModal
-        isOpen={isCameraUpgradeModalOpen}
-        onClose={() => setIsCameraUpgradeModalOpen(false)}
-        user={user}
-      />
-    </div>
+        <CameraUpgradeModal
+          isOpen={isCameraUpgradeModalOpen}
+          onClose={() => setIsCameraUpgradeModalOpen(false)}
+          user={user}
+        />
+      </div>
+    </OnlineStatusGuard>
   );
 }
 

@@ -65,15 +65,24 @@ class LocalDatabase {
     saveEncryptedItem(this.getScopedKey(key, explicitPhone), value);
   }
 
-  private triggerCloudSync() {
+  public triggerCloudSync() {
     if (typeof window !== 'undefined') {
+      try {
+        window.dispatchEvent(new CustomEvent('idenia_db_changed', { detail: { timestamp: Date.now() } }));
+        if (typeof BroadcastChannel !== 'undefined') {
+          const bc = new BroadcastChannel('idenia_local_db_channel');
+          bc.postMessage({ type: 'DB_CHANGED', timestamp: Date.now() });
+          bc.close();
+        }
+      } catch {}
+
       setTimeout(() => {
         try {
           import('./cloudDatabase').then(m => {
             m.cloudDatabaseService.syncAllDataToCloud().catch(() => {});
           }).catch(() => {});
         } catch {}
-      }, 30);
+      }, 20);
     }
   }
 

@@ -149,7 +149,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
           </h1>
 
           <p className="text-sm sm:text-base text-gray-600 dark:text-gray-300 leading-relaxed font-medium">
-            تطبيق تجاري احترافي وسريع صُمم خصيصاً لأصحاب المحلات والأنشطة التجارية في الوطن العربي. إدارة فورية لنقاط البيع، طباعة الفواتير الحرارية، جرد المخزون، ودفتر الديون، ويعمل بكفاءة عالية وبدون الحاجة لإنترنت.
+            تطبيق تجاري احترافي وسريع صُمم خصيصاً لأصحاب المحلات والأنشطة التجارية في الوطن العربي. إدارة فورية لنقاط البيع، طباعة الفواتير الحرارية، جرد المخزون، ودفتر الديون، مع مزامنة سحابية لحظية وفورية بين هاتفك والكمبيوتر.
           </p>
 
           {/* Action Area: Changes dynamically based on merchant logged-in state */}
@@ -314,16 +314,16 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
               </p>
             </div>
 
-            {/* Card 6: Backup & Offline */}
+            {/* Card 6: Live Cloud Sync */}
             <div className="bg-white dark:bg-[#1E1E1E] p-6 rounded-3xl border border-gray-200 dark:border-gray-800 shadow-2xs hover:shadow-xs transition-all space-y-3">
               <div className="w-12 h-12 rounded-2xl bg-teal-50 dark:bg-teal-950/60 text-teal-600 dark:text-teal-400 flex items-center justify-center">
-                <HardDrive className="w-6 h-6" />
+                <Sparkles className="w-6 h-6" />
               </div>
               <h3 className="font-black text-base text-gray-900 dark:text-white">
-                يعمل بدون إنترنت (100% Offline)
+                مزامنة سحابية لحظية (Live Real-Time Sync)
               </h3>
               <p className="text-xs text-gray-600 dark:text-gray-400 leading-relaxed">
-                بعد التسجيل والتفعيل، يعمل التطبيق محلياً بالكامل بدون الحاجة لإنترنت، مع تصدير واسترجاع النسخ الاحتياطية.
+                مزامنة فائقة السرعة في أجزاء من الثانية بين الهاتف والكمبيوتر، بحيث تظهر أي عملية بيع أو تعديل مخزني على الفور لجميع الأجهزة.
               </p>
             </div>
           </div>

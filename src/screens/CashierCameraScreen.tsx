@@ -712,55 +712,33 @@ export const CashierCameraScreen: React.FC<CashierCameraScreenProps> = ({
           </div>
         )}
 
-        {/* Camera Permission / Error Fallback Screen with Clear Step-by-Step Guide */}
+        {/* Camera Permission / Error Fallback Screen */}
         {cameraError && (
-          <div className="absolute inset-0 z-30 bg-black/95 flex flex-col items-center justify-center p-4 sm:p-6 text-center overflow-y-auto">
-            <div className="max-w-md w-full space-y-4 my-auto">
-              <div className="w-16 h-16 mx-auto rounded-3xl bg-amber-950/80 border border-amber-600/60 text-amber-400 flex items-center justify-center shadow-lg shadow-amber-900/30">
+          <div className="absolute inset-0 z-30 bg-black/95 flex flex-col items-center justify-center p-4 sm:p-6 text-center">
+            <div className="max-w-sm w-full space-y-4 my-auto bg-zinc-900/90 border border-zinc-700 p-6 rounded-3xl backdrop-blur-xl">
+              <div className="w-16 h-16 mx-auto rounded-3xl bg-emerald-500/10 border-2 border-emerald-500/30 text-emerald-400 flex items-center justify-center shadow-lg">
                 <Camera className="w-8 h-8" />
               </div>
 
-              <div className="space-y-1.5">
+              <div className="space-y-1">
                 <h3 className="font-black text-base md:text-lg text-white">
-                  {isPermissionDenied ? 'إذن استخدام الكاميرا مطلوب' : 'تعذر تشغيل الكاميرا'}
+                  كاميرا قارئ الباركود
                 </h3>
-                <p className="text-xs text-gray-300 leading-relaxed">
-                  {cameraError}
+                <p className="text-xs text-gray-300">
+                  يمكنك التصوير المباشر للباركود بكاميرا الهاتف أو إعادة تشغيل البث
                 </p>
               </div>
 
-              {/* Step-by-Step Permission Instruction Box */}
-              <div className="p-4 rounded-2xl bg-white/5 border border-white/10 text-right space-y-2 text-xs text-gray-200">
-                <div className="font-bold text-amber-400 flex items-center gap-1.5 text-xs">
-                  <Info className="w-4 h-4 shrink-0" />
-                  <span>خطوات السماح بالكاميرا على هاتفك:</span>
-                </div>
-                <ol className="list-decimal list-inside space-y-1.5 text-[11px] text-gray-300 leading-normal pr-1">
-                  <li>
-                    اضغط على أيقونة <strong>(القفل 🔒 أو إعدادات الموقع ⚙️)</strong> بجانب رابط الموقع في أعلى المتصفح.
-                  </li>
-                  <li>
-                    اضغط على <strong>«أذونات الموقع / Permissions»</strong> ثم <strong>«الكاميرا / Camera»</strong>.
-                  </li>
-                  <li>
-                    اختر <strong>«سماح / Allow»</strong> لتفعيل الكاميرا.
-                  </li>
-                  <li>
-                    اضغط على زر <strong>«إعادة المحاولة وتفعيل الكاميرا»</strong> بالأسفل.
-                  </li>
-                </ol>
-              </div>
-
               {/* Action Buttons */}
-              <div className="space-y-2 pt-1">
-                {/* 1. Native Camera Capture (Instant Bypass) */}
+              <div className="space-y-2.5 pt-2">
+                {/* 1. Instant Camera Capture */}
                 <button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
-                  className="w-full py-3 px-4 rounded-2xl bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-500 hover:to-green-500 text-white font-black text-xs shadow-lg transition-all flex items-center justify-center gap-2 cursor-pointer"
+                  className="w-full py-3.5 px-4 rounded-2xl bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-500 hover:to-green-500 text-white font-black text-xs shadow-lg transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-98"
                 >
                   <Camera className="w-4 h-4" />
-                  <span>📸 تصوير الباركود بكاميرا الهاتف (بدون إذن متصفح)</span>
+                  <span>📸 التقاط صورة للباركود بالكاميرا مباشرة</span>
                 </button>
 
                 {/* 2. Retry Live Stream */}
@@ -768,37 +746,21 @@ export const CashierCameraScreen: React.FC<CashierCameraScreenProps> = ({
                   type="button"
                   onClick={() => startCamera('environment')}
                   disabled={isStartingCamera}
-                  className="w-full py-2.5 px-4 rounded-2xl bg-white/10 hover:bg-white/20 disabled:opacity-50 text-white font-bold text-xs border border-white/10 transition-all flex items-center justify-center gap-2 cursor-pointer"
+                  className="w-full py-3 px-4 rounded-2xl bg-white/10 hover:bg-white/20 disabled:opacity-50 text-white font-bold text-xs border border-white/10 transition-all flex items-center justify-center gap-2 cursor-pointer"
                 >
                   <RefreshCw className={`w-4 h-4 ${isStartingCamera ? 'animate-spin' : ''}`} />
-                  <span>{isStartingCamera ? 'جاري محاولة فتح الكاميرا...' : 'إعادة المحاولة وتفعيل البث الحي'}</span>
+                  <span>{isStartingCamera ? 'جاري فتح الكاميرا...' : '🔄 إعادة تشغيل بث الكاميرا'}</span>
                 </button>
 
-                <div className="grid grid-cols-2 gap-2">
-                  {/* Switch to Front Camera as fallback */}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const next = facingMode === 'environment' ? 'user' : 'environment';
-                      setFacingMode(next);
-                      startCamera(next);
-                    }}
-                    className="py-2.5 px-3 rounded-2xl bg-white/10 hover:bg-white/20 text-white font-bold text-xs border border-white/10 transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
-                  >
-                    <SwitchCamera className="w-3.5 h-3.5" />
-                    <span>الكاميرا {facingMode === 'environment' ? 'الأمامية' : 'الخلفية'}</span>
-                  </button>
-
-                  {/* Manual Barcode Input button */}
-                  <button
-                    type="button"
-                    onClick={() => setIsManualInputOpen(true)}
-                    className="py-2.5 px-3 rounded-2xl bg-white/10 hover:bg-white/20 text-white font-bold text-xs border border-white/10 transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
-                  >
-                    <Keyboard className="w-3.5 h-3.5 text-amber-400" />
-                    <span>إدخال يدوي</span>
-                  </button>
-                </div>
+                {/* Manual Barcode Input button */}
+                <button
+                  type="button"
+                  onClick={() => setIsManualInputOpen(true)}
+                  className="w-full py-2.5 px-3 rounded-2xl bg-zinc-800 hover:bg-zinc-700 text-gray-200 font-bold text-xs border border-zinc-700 transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  <Keyboard className="w-4 h-4 text-amber-400" />
+                  <span>إدخال رقم الباركود يدوياً</span>
+                </button>
               </div>
             </div>
           </div>

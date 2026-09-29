@@ -656,20 +656,30 @@ export async function getMerchantCloudConfigFromFirebase(phone: string): Promise
   return null;
 }
 
-// 14.1. Save Merchant Full Data Snapshot to Central Cloud (For Cross-Device Roaming)
+// 14.1. Save Merchant Full Data Snapshot & Live Real-Time Sync to Central Cloud (Instant Cross-Device Sync)
 export async function saveMerchantDataSnapshotInFirebase(phone: string, snapshot: any) {
   const cleanPhone = phone.replace(/[^0-9]/g, '');
   if (!cleanPhone || !snapshot) return { success: false };
 
   try {
-    const backupRef = doc(firestore, 'merchants', `m_${cleanPhone}`, 'cloud_backup', 'latest');
+    const deviceId = getDeviceId();
     const metaPayload = {
       updatedAt: Date.now(),
       isoDate: new Date().toISOString(),
       merchantPhone: cleanPhone,
+      updatedByDeviceId: deviceId,
       data: snapshot
     };
-    await setDoc(backupRef, metaPayload, { merge: true });
+
+    // Write to both latest backup and active realtime live channel
+    const liveDocRef = doc(firestore, 'merchants', `m_${cleanPhone}`, 'live_data', 'store_data');
+    const backupRef = doc(firestore, 'merchants', `m_${cleanPhone}`, 'cloud_backup', 'latest');
+
+    await Promise.allSettled([
+      setDoc(liveDocRef, metaPayload, { merge: true }),
+      setDoc(backupRef, metaPayload, { merge: true })
+    ]);
+
     return { success: true };
   } catch (err) {
     console.warn('Error saving merchant data snapshot in firebase:', err);
@@ -683,6 +693,13 @@ export async function getMerchantDataSnapshotFromFirebase(phone: string): Promis
   if (!cleanPhone) return null;
 
   try {
+    const liveDocRef = doc(firestore, 'merchants', `m_${cleanPhone}`, 'live_data', 'store_data');
+    const liveSnap = await getDoc(liveDocRef);
+    if (liveSnap.exists()) {
+      const val = liveSnap.data();
+      return val?.data || null;
+    }
+
     const backupRef = doc(firestore, 'merchants', `m_${cleanPhone}`, 'cloud_backup', 'latest');
     const snap = await getDoc(backupRef);
     if (snap.exists()) {
@@ -693,6 +710,42 @@ export async function getMerchantDataSnapshotFromFirebase(phone: string): Promis
     console.warn('Error getting merchant data snapshot from firebase:', err);
   }
   return null;
+}
+
+// 14.3. Real-Time Sub-Second Cross-Device Data Sync Listener (Phone <-> PC)
+export function subscribeToMerchantDataSnapshotInFirebase(
+  phone: string,
+  onRemoteUpdate: (payload: { data: any; updatedAt: number; updatedByDeviceId?: string }) => void
+): () => void {
+  const cleanPhone = phone.replace(/[^0-9]/g, '');
+  if (!cleanPhone) return () => {};
+
+  try {
+    const liveDocRef = doc(firestore, 'merchants', `m_${cleanPhone}`, 'live_data', 'store_data');
+    const unsubscribe = onSnapshot(
+      liveDocRef,
+      { includeMetadataChanges: false },
+      (docSnap) => {
+        if (!docSnap.exists()) return;
+        const data = docSnap.data();
+        if (data && data.data) {
+          onRemoteUpdate({
+            data: data.data,
+            updatedAt: data.updatedAt || Date.now(),
+            updatedByDeviceId: data.updatedByDeviceId
+          });
+        }
+      },
+      (err) => {
+        console.warn('Real-time database sync listener error:', err);
+      }
+    );
+
+    return unsubscribe;
+  } catch (err) {
+    console.warn('Could not attach real-time database listener:', err);
+    return () => {};
+  }
 }
 
 // 15. Admin: Save Database Tutorial Video & Link Settings
