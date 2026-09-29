@@ -7,7 +7,46 @@ const ZipArchive = (archiverModule as any).ZipArchive || (archiverModule as any)
 const app = express();
 const PORT = 3000;
 
-app.use(express.json());
+app.use(express.json({ limit: "15mb" }));
+
+// AI Visual Code / OCR Scanner for printed numbers and custom product codes
+app.post("/api/scan-ai-code", async (req, res) => {
+  try {
+    const { imageBase64 } = req.body;
+    if (!imageBase64) {
+      return res.status(400).json({ success: false, message: "No image provided" });
+    }
+
+    const cleanBase64 = String(imageBase64).replace(/^data:image\/\w+;base64,/, "");
+
+    const { GoogleGenAI } = await import("@google/genai");
+    const ai = new GoogleGenAI();
+    const response = await ai.models.generateContent({
+      model: "gemini-3.1-flash-lite",
+      contents: [
+        {
+          inlineData: {
+            mimeType: "image/jpeg",
+            data: cleanBase64
+          }
+        },
+        "You are an ultra-fast retail cashier OCR scanner. Extract ONLY the product code or numbers (such as 31089, 10234, etc.) printed or written on the item/label in this cropped image. Return ONLY the code or numbers as clean plain text with no spaces, words, letters, punctuation, or formatting. If no product code or numbers are visible, return 'NONE'."
+      ]
+    });
+
+    const rawText = response.text ? response.text.trim() : "";
+    const cleanCode = rawText.replace(/[^0-9A-Za-z_-]/g, "");
+
+    if (cleanCode && cleanCode !== "NONE" && cleanCode.length >= 2) {
+      return res.json({ success: true, code: cleanCode });
+    }
+
+    return res.json({ success: false, message: "No code found in image" });
+  } catch (err: any) {
+    console.warn("Scan AI OCR error:", err?.message || err);
+    return res.status(500).json({ success: false, error: err?.message || "Failed" });
+  }
+});
 
 // Health check endpoints for Cloud Run / load balancer probes
 app.get(["/health", "/api/health"], (req, res) => {

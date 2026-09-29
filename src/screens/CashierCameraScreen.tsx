@@ -17,7 +17,8 @@ import {
   Layers,
   PackageCheck,
   ZoomIn,
-  Focus
+  Focus,
+  Sparkles
 } from 'lucide-react';
 import { BrowserMultiFormatReader, DecodeHintType, BarcodeFormat } from '@zxing/library';
 import { db } from '../services/db';
@@ -64,6 +65,9 @@ export const CashierCameraScreen: React.FC<CashierCameraScreenProps> = ({
   const [hardwareZoomAvailable, setHardwareZoomAvailable] = useState<boolean>(false);
   const [focusRingCoords, setFocusRingCoords] = useState<{ x: number; y: number } | null>(null);
 
+  // AI Visual OCR Scanner state for printed numbers (e.g. 31089)
+  const [isAiScanning, setIsAiScanning] = useState<boolean>(false);
+
   // Manual Barcode Input modal
   const [isManualInputOpen, setIsManualInputOpen] = useState<boolean>(false);
   const [manualBarcode, setManualBarcode] = useState<string>('');
@@ -80,6 +84,7 @@ export const CashierCameraScreen: React.FC<CashierCameraScreenProps> = ({
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const scanIntervalRef = useRef<any>(null);
+  const aiScanIntervalRef = useRef<any>(null);
   const zxingReaderRef = useRef<BrowserMultiFormatReader | null>(null);
   const isScanningActiveRef = useRef<boolean>(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -205,6 +210,10 @@ export const CashierCameraScreen: React.FC<CashierCameraScreenProps> = ({
     if (scanIntervalRef.current) {
       clearInterval(scanIntervalRef.current);
       scanIntervalRef.current = null;
+    }
+    if (aiScanIntervalRef.current) {
+      clearInterval(aiScanIntervalRef.current);
+      aiScanIntervalRef.current = null;
     }
     if (zxingReaderRef.current) {
       try {
@@ -392,12 +401,12 @@ export const CashierCameraScreen: React.FC<CashierCameraScreenProps> = ({
     }
   };
 
-  // Safe, High-Performance Barcode Scanner Engine (80ms zero-latency cycle)
+  // Safe, Dual-Engine Barcode & AI Visual Number Scanner
   const startScannerEngine = (video: HTMLVideoElement) => {
     stopScannerEngine();
     isScanningActiveRef.current = true;
 
-    // Standard commercial barcodes: exclude noisy formats like ITF to eliminate false scans
+    // Standard commercial barcodes: exclude noisy formats to eliminate false scans
     const standardRetailFormats = [
       'ean_13',
       'ean_8',
@@ -432,40 +441,98 @@ export const CashierCameraScreen: React.FC<CashierCameraScreenProps> = ({
           } finally {
             isBusy = false;
           }
-        }, 80); // 80ms cycle = ~12.5 scans per second for lightning fast detection
-        return;
+        }, 80); // 80ms cycle = ~12.5 scans per second for lightning fast barcode detection
       } catch (err) {
         console.warn('Native BarcodeDetector not available, using ZXing continuous reader:', err);
       }
+    } else {
+      // LAYER B: ZXing continuous reader with tuned retail hints (fallback if BarcodeDetector absent)
+      try {
+        if (!zxingReaderRef.current) {
+          const hints = new Map();
+          hints.set(DecodeHintType.POSSIBLE_FORMATS, [
+            BarcodeFormat.EAN_13,
+            BarcodeFormat.EAN_8,
+            BarcodeFormat.UPC_A,
+            BarcodeFormat.UPC_E,
+            BarcodeFormat.CODE_128,
+            BarcodeFormat.CODE_39,
+            BarcodeFormat.QR_CODE
+          ]);
+          hints.set(DecodeHintType.TRY_HARDER, true);
+          zxingReaderRef.current = new BrowserMultiFormatReader(hints);
+        }
+        zxingReaderRef.current.decodeFromVideoElementContinuously(video, (result, err) => {
+          if (!isScanningActiveRef.current) return;
+          if (result && result.getText()) {
+            const clean = result.getText().trim();
+            if (clean && clean.length >= 3) {
+              handleBarcodeScanned(clean);
+            }
+          }
+        });
+      } catch (err) {
+        console.warn('ZXing decodeFromVideoElementContinuously error:', err);
+      }
     }
 
-    // LAYER B: ZXing continuous reader with tuned retail hints
-    try {
-      if (!zxingReaderRef.current) {
-        const hints = new Map();
-        hints.set(DecodeHintType.POSSIBLE_FORMATS, [
-          BarcodeFormat.EAN_13,
-          BarcodeFormat.EAN_8,
-          BarcodeFormat.UPC_A,
-          BarcodeFormat.UPC_E,
-          BarcodeFormat.CODE_128,
-          BarcodeFormat.CODE_39,
-          BarcodeFormat.QR_CODE
-        ]);
-        hints.set(DecodeHintType.TRY_HARDER, true);
-        zxingReaderRef.current = new BrowserMultiFormatReader(hints);
+    // LAYER C: High-Accuracy AI Visual OCR for printed numbers & custom product codes (like 31089)
+    let isAiBusy = false;
+    aiScanIntervalRef.current = setInterval(async () => {
+      if (!isScanningActiveRef.current || !video || video.readyState < 2 || isAiBusy) return;
+      // Do not repeat if scanned within 1.6s
+      if (Date.now() - lastScanTimestampRef.current < 1600) return;
+
+      try {
+        isAiBusy = true;
+        await triggerAiFrameScan(video);
+      } catch (e) {
+      } finally {
+        isAiBusy = false;
       }
-      zxingReaderRef.current.decodeFromVideoElementContinuously(video, (result, err) => {
-        if (!isScanningActiveRef.current) return;
-        if (result && result.getText()) {
-          const clean = result.getText().trim();
-          if (clean && clean.length >= 3) {
-            handleBarcodeScanned(clean);
-          }
-        }
+    }, 600);
+  };
+
+  // Trigger Instant AI OCR Frame Scan for printed numbers (e.g. 31089)
+  const triggerAiFrameScan = async (forcedVideo?: HTMLVideoElement | null) => {
+    const video = forcedVideo || videoRef.current;
+    if (!video || video.readyState < 2) return;
+
+    try {
+      setIsAiScanning(true);
+      const vWidth = video.videoWidth;
+      const vHeight = video.videoHeight;
+      if (!vWidth || !vHeight) return;
+
+      // Crop the center 55% where the green target box is located
+      const cropSize = Math.min(vWidth, vHeight) * 0.55;
+      const startX = (vWidth - cropSize) / 2;
+      const startY = (vHeight - cropSize) / 2;
+
+      const canvas = document.createElement('canvas');
+      canvas.width = 360;
+      canvas.height = 360;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+
+      ctx.drawImage(video, startX, startY, cropSize, cropSize, 0, 0, 360, 360);
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
+
+      const res = await fetch('/api/scan-ai-code', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imageBase64: dataUrl })
       });
+
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data.success && data.code) {
+        handleBarcodeScanned(data.code);
+      }
     } catch (err) {
-      console.warn('ZXing decodeFromVideoElementContinuously error:', err);
+      console.warn('AI frame scan failed:', err);
+    } finally {
+      setIsAiScanning(false);
     }
   };
 
@@ -493,13 +560,16 @@ export const CashierCameraScreen: React.FC<CashierCameraScreenProps> = ({
     else applyZoom(1);
   };
 
-  // Tap on viewfinder to focus
+  // Tap on viewfinder to focus & trigger instant AI OCR scan
   const handleTapToFocus = async (e: React.MouseEvent<HTMLDivElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
     setFocusRingCoords({ x, y });
     setTimeout(() => setFocusRingCoords(null), 900);
+
+    // Trigger instant visual recognition on tap
+    triggerAiFrameScan();
 
     if (!streamRef.current) return;
     const track = streamRef.current.getVideoTracks()[0];
@@ -648,7 +718,7 @@ export const CashierCameraScreen: React.FC<CashierCameraScreenProps> = ({
         setLastScannedProduct({
           product: {
             id: '',
-            name: `باركود غير مسجل: ${clean}`,
+            name: `كود غير مسجل: ${clean}`,
             description: '',
             category: 'غير معروف',
             purchase_price: 0,
@@ -661,7 +731,7 @@ export const CashierCameraScreen: React.FC<CashierCameraScreenProps> = ({
           },
           time: now,
           mode: 'return',
-          message: `تنبيه: باركود (${clean}) غير مسجل في المخزن. تم إرساله لمحطة (${stationId}).`
+          message: `تنبيه: الكود (${clean}) غير مسجل في المخزن. تم إرساله لمحطة (${stationId}).`
         });
       }
     } else {
@@ -674,14 +744,14 @@ export const CashierCameraScreen: React.FC<CashierCameraScreenProps> = ({
           product: targetProduct,
           time: now,
           mode: 'sale',
-          message: `تم إرسال الصنف فوراً إلى فاتورة محطة (${stationId}) بنجاح!`
+          message: `تم التعرف بنجاح وإرسال الصنف لفاتورة محطة (${stationId})!`
         });
       } else {
         playBeep('error');
         setLastScannedProduct({
           product: {
             id: '',
-            name: `باركود غير مسجل: ${clean}`,
+            name: `كود غير مسجل: ${clean}`,
             description: '',
             category: 'غير معروف',
             purchase_price: 0,
@@ -694,7 +764,7 @@ export const CashierCameraScreen: React.FC<CashierCameraScreenProps> = ({
           },
           time: now,
           mode: 'sale',
-          message: `تم إرسال الباركود (${clean}) لمحطة (${stationId}). الصنف غير مسجل بالمخزن.`
+          message: `تم التعرف على الكود (${clean}) وإرساله لمحطة (${stationId}). الصنف غير مسجل بالمخزن.`
         });
       }
     }
@@ -711,6 +781,24 @@ export const CashierCameraScreen: React.FC<CashierCameraScreenProps> = ({
         const dataUrl = event.target?.result as string;
         if (!dataUrl) return;
 
+        // Try AI OCR on the captured photo first!
+        try {
+          setIsAiScanning(true);
+          const res = await fetch('/api/scan-ai-code', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ imageBase64: dataUrl })
+          });
+          const resData = await res.json();
+          if (resData.success && resData.code) {
+            handleBarcodeScanned(resData.code);
+            return;
+          }
+        } catch {} finally {
+          setIsAiScanning(false);
+        }
+
+        // Fallback to ZXing
         const img = new Image();
         img.onload = async () => {
           try {
@@ -721,10 +809,10 @@ export const CashierCameraScreen: React.FC<CashierCameraScreenProps> = ({
             if (zxResult && zxResult.getText()) {
               handleBarcodeScanned(zxResult.getText());
             } else {
-              alert('لم يتم العثور على باركود واضح في الصورة الملتقطة.');
+              alert('لم يتم العثور على باركود أو كود واضح في الصورة الملتقطة.');
             }
           } catch {
-            alert('تعذر قراءة الباركود من الصورة.');
+            alert('تعذر قراءة الكود من الصورة.');
           }
         };
         img.src = dataUrl;
@@ -800,6 +888,22 @@ export const CashierCameraScreen: React.FC<CashierCameraScreenProps> = ({
 
         {/* Action Controls */}
         <div className="flex items-center gap-1.5 sm:gap-2">
+          {/* Instant AI OCR Scan Button */}
+          <button
+            onClick={() => triggerAiFrameScan()}
+            disabled={isAiScanning}
+            className={`px-2.5 py-1.5 rounded-full backdrop-blur-md text-xs font-black transition-all cursor-pointer flex items-center gap-1 shadow-md ${
+              isAiScanning
+                ? 'bg-amber-400 text-black animate-pulse'
+                : 'bg-emerald-600/90 hover:bg-emerald-500 text-white'
+            }`}
+            title="مسح الأرقام المطبوعة والباركود فوراً بالذكاء البصري"
+          >
+            <Sparkles className="w-3.5 h-3.5 text-amber-200" />
+            <span className="hidden sm:inline">{isAiScanning ? 'جارِ الفحص...' : 'فحص ذكي ⚡'}</span>
+            <span className="sm:hidden">{isAiScanning ? '...' : '⚡'}</span>
+          </button>
+
           {/* Zoom Toggle Button (1x / 1.5x / 2x) */}
           <button
             onClick={cycleZoom}
@@ -891,26 +995,32 @@ export const CashierCameraScreen: React.FC<CashierCameraScreenProps> = ({
         {cameraActive && (
           <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none p-6">
             <div className={`relative w-72 h-72 sm:w-80 sm:h-80 border-2 rounded-3xl overflow-hidden shadow-2xl backdrop-brightness-105 transition-colors duration-300 ${
-              mode === 'sale' ? 'border-emerald-400/60' : 'border-amber-400/60'
+              isAiScanning
+                ? 'border-amber-400 shadow-amber-500/50'
+                : mode === 'sale'
+                ? 'border-emerald-400/60'
+                : 'border-amber-400/60'
             }`}>
               {/* Viewfinder Corners */}
               <div className={`absolute top-0 left-0 w-8 h-8 border-t-4 border-l-4 rounded-tl-2xl ${
-                mode === 'sale' ? 'border-emerald-400' : 'border-amber-400'
+                isAiScanning ? 'border-amber-400' : mode === 'sale' ? 'border-emerald-400' : 'border-amber-400'
               }`} />
               <div className={`absolute top-0 right-0 w-8 h-8 border-t-4 border-r-4 rounded-tr-2xl ${
-                mode === 'sale' ? 'border-emerald-400' : 'border-amber-400'
+                isAiScanning ? 'border-amber-400' : mode === 'sale' ? 'border-emerald-400' : 'border-amber-400'
               }`} />
               <div className={`absolute bottom-0 left-0 w-8 h-8 border-b-4 border-l-4 rounded-bl-2xl ${
-                mode === 'sale' ? 'border-emerald-400' : 'border-amber-400'
+                isAiScanning ? 'border-amber-400' : mode === 'sale' ? 'border-emerald-400' : 'border-amber-400'
               }`} />
               <div className={`absolute bottom-0 right-0 w-8 h-8 border-b-4 border-r-4 rounded-br-2xl ${
-                mode === 'sale' ? 'border-emerald-400' : 'border-amber-400'
+                isAiScanning ? 'border-amber-400' : mode === 'sale' ? 'border-emerald-400' : 'border-amber-400'
               }`} />
 
               {/* Glowing Fast Laser Scan Line */}
               <div
                 className={`absolute left-0 right-0 h-0.5 shadow-lg ${
-                  mode === 'sale'
+                  isAiScanning
+                    ? 'bg-amber-400 shadow-amber-400/90'
+                    : mode === 'sale'
                     ? 'bg-emerald-400 shadow-emerald-400/80'
                     : 'bg-amber-400 shadow-amber-400/80'
                 }`}
@@ -922,20 +1032,24 @@ export const CashierCameraScreen: React.FC<CashierCameraScreenProps> = ({
               {/* Center target dot */}
               <div className="absolute inset-0 flex items-center justify-center">
                 <div className={`w-3 h-3 rounded-full opacity-70 ${
-                  mode === 'sale' ? 'bg-emerald-400' : 'bg-amber-400'
+                  isAiScanning ? 'bg-amber-400 animate-ping' : mode === 'sale' ? 'bg-emerald-400' : 'bg-amber-400'
                 }`} />
               </div>
             </div>
 
             {/* Mode Banner Indicator */}
             <p className={`mt-4 text-xs font-black backdrop-blur-md px-4 py-1.5 rounded-full border shadow-lg text-center transition-all ${
-              mode === 'sale'
+              isAiScanning
+                ? 'bg-amber-950/90 border-amber-400/60 text-amber-200 animate-pulse'
+                : mode === 'sale'
                 ? 'bg-emerald-950/80 border-emerald-400/40 text-emerald-200'
                 : 'bg-amber-950/80 border-amber-400/40 text-amber-200'
             }`}>
-              {mode === 'sale'
-                ? `🛒 وضع البيع: وجّه الكاميرا لإضافة الصنف فوراً لفاتورة (${stationId})`
-                : `🔄 وضع الاسترجاع: وجّه الكاميرا لاسترجاع الصنف وإعادته للمخزن (+1)`}
+              {isAiScanning
+                ? '⚡ جارِ التعرف البصري الذكي على الكود والأرقام...'
+                : mode === 'sale'
+                ? `🛒 وضع البيع: وجّه الكاميرا نحو الكود (${stationId})`
+                : `🔄 وضع الاسترجاع: وجّه الكاميرا لاسترجاع الصنف (+1)`}
             </p>
           </div>
         )}

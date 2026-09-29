@@ -15,6 +15,7 @@ import { db } from '../services/db';
 import { Product, ProductUnit, AppSettings } from '../types';
 import { PRODUCT_UNITS } from '../data/tradeCategories';
 import { ConfirmModal } from '../components/ConfirmModal';
+import { BarcodeStickerModal } from '../components/BarcodeStickerModal';
 
 interface ProductsScreenProps {
   editProductItem?: Product | null;
@@ -43,6 +44,7 @@ export const ProductsScreen: React.FC<ProductsScreenProps> = ({
 
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [deleteProductId, setDeleteProductId] = useState<string | null>(null);
+  const [stickerProduct, setStickerProduct] = useState<Product | null>(null);
 
   const loadData = () => {
     setProducts(db.getProducts());
@@ -395,6 +397,13 @@ export const ProductsScreen: React.FC<ProductsScreenProps> = ({
 
                 <div className="flex items-center gap-1.5 shrink-0">
                   <button
+                    onClick={() => setStickerProduct(p)}
+                    className="p-1.5 text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 rounded-lg cursor-pointer"
+                    title="طباعة ملصق الباركود للصنف"
+                  >
+                    <Barcode className="w-4 h-4" />
+                  </button>
+                  <button
                     onClick={() => {
                       setId(p.id);
                       setName(p.name);
@@ -435,6 +444,14 @@ export const ProductsScreen: React.FC<ProductsScreenProps> = ({
         danger={true}
         onConfirm={handleDeleteConfirm}
         onClose={() => setDeleteProductId(null)}
+      />
+
+      {/* Barcode Printable Sticker Modal */}
+      <BarcodeStickerModal
+        product={stickerProduct}
+        settings={settings}
+        isOpen={!!stickerProduct}
+        onClose={() => setStickerProduct(null)}
       />
     </div>
   );
