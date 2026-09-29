@@ -15,9 +15,11 @@ import {
   Smartphone,
   QrCode,
   Layers,
-  PackageCheck
+  PackageCheck,
+  ZoomIn,
+  Focus
 } from 'lucide-react';
-import { BrowserMultiFormatReader } from '@zxing/library';
+import { BrowserMultiFormatReader, DecodeHintType, BarcodeFormat } from '@zxing/library';
 import { db } from '../services/db';
 import { Product, AppSettings, UserAccount } from '../types';
 import {
@@ -37,7 +39,7 @@ export const CashierCameraScreen: React.FC<CashierCameraScreenProps> = ({
 }) => {
   // Mode: 'sale' (إضافة لفاتورة البيع الحالية) or 'return' (استرجاع وإعادة للمخزن)
   const [mode, setMode] = useState<'sale' | 'return'>('sale');
-  const [products, setProducts] = useState<Product[]>([]);
+  const [, setProducts] = useState<Product[]>([]);
   const [, setSettings] = useState<AppSettings>(db.getSettings());
 
   // Station Pairing state (Link this phone specifically to a PC station e.g. POS-1, POS-2)
@@ -56,6 +58,11 @@ export const CashierCameraScreen: React.FC<CashierCameraScreenProps> = ({
   const [torchAvailable, setTorchAvailable] = useState<boolean>(false);
   const [torchOn, setTorchOn] = useState<boolean>(false);
   const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
+
+  // Zoom controls (1x / 1.5x / 2x) for sharp macro barcode reading without blurring
+  const [zoomLevel, setZoomLevel] = useState<number>(1);
+  const [hardwareZoomAvailable, setHardwareZoomAvailable] = useState<boolean>(false);
+  const [focusRingCoords, setFocusRingCoords] = useState<{ x: number; y: number } | null>(null);
 
   // Manual Barcode Input modal
   const [isManualInputOpen, setIsManualInputOpen] = useState<boolean>(false);
@@ -104,38 +111,90 @@ export const CashierCameraScreen: React.FC<CashierCameraScreenProps> = ({
     return () => clearInterval(interval);
   }, [user?.phone, stationId]);
 
-  // Audio Beep
+  // High-Volume Piercing Supermarket Cashier Beeper (100% Volume + Haptic Vibrate)
   const playBeep = (type: 'sale' | 'return' | 'error' = 'sale') => {
+    // 1. Mobile Tactile Haptic Vibration
+    if (typeof navigator !== 'undefined' && navigator.vibrate) {
+      try {
+        if (type === 'sale') navigator.vibrate([70]);
+        else if (type === 'return') navigator.vibrate([45, 50, 90]);
+        else navigator.vibrate([160]);
+      } catch {}
+    }
+
     if (!soundEnabled) return;
+
     try {
       const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
       if (!AudioCtx) return;
       const ctx = new AudioCtx();
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.connect(gain);
-      gain.connect(ctx.destination);
+      if (ctx.state === 'suspended') {
+        ctx.resume();
+      }
+
+      // Max Gain Master Output
+      const masterGain = ctx.createGain();
+      masterGain.gain.setValueAtTime(1.0, ctx.currentTime);
+
+      // Supermarket Beeper Dynamics Compressor (makes the beep razor sharp & loud)
+      const compressor = ctx.createDynamicsCompressor();
+      compressor.threshold.setValueAtTime(-18, ctx.currentTime);
+      compressor.knee.setValueAtTime(30, ctx.currentTime);
+      compressor.ratio.setValueAtTime(14, ctx.currentTime);
+      compressor.attack.setValueAtTime(0, ctx.currentTime);
+      compressor.release.setValueAtTime(0.08, ctx.currentTime);
+
+      masterGain.connect(compressor);
+      compressor.connect(ctx.destination);
 
       if (type === 'sale') {
-        osc.frequency.setValueAtTime(1400, ctx.currentTime);
-        gain.gain.setValueAtTime(0.2, ctx.currentTime);
-        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.15);
+        // High-pitch 2550 Hz crystal chime (Zebra / Honeywell signature scanner beep)
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(2550, ctx.currentTime);
+        gain.gain.setValueAtTime(1.0, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.16);
+
+        osc.connect(gain);
+        gain.connect(masterGain);
         osc.start(ctx.currentTime);
-        osc.stop(ctx.currentTime + 0.15);
+        osc.stop(ctx.currentTime + 0.16);
       } else if (type === 'return') {
-        // Two pleasant chimes for return/restock
-        osc.frequency.setValueAtTime(800, ctx.currentTime);
-        osc.frequency.exponentialRampToValueAtTime(1100, ctx.currentTime + 0.12);
-        gain.gain.setValueAtTime(0.25, ctx.currentTime);
-        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.22);
-        osc.start(ctx.currentTime);
-        osc.stop(ctx.currentTime + 0.22);
+        // Dual ascending cheerful chime for return/restock
+        const osc1 = ctx.createOscillator();
+        const osc2 = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc1.type = 'sine';
+        osc2.type = 'triangle';
+        osc1.frequency.setValueAtTime(1200, ctx.currentTime);
+        osc1.frequency.exponentialRampToValueAtTime(1900, ctx.currentTime + 0.12);
+        osc2.frequency.setValueAtTime(1900, ctx.currentTime);
+        osc2.frequency.exponentialRampToValueAtTime(2600, ctx.currentTime + 0.12);
+
+        gain.gain.setValueAtTime(0.95, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.24);
+
+        osc1.connect(gain);
+        osc2.connect(gain);
+        gain.connect(masterGain);
+        osc1.start(ctx.currentTime);
+        osc2.start(ctx.currentTime);
+        osc1.stop(ctx.currentTime + 0.24);
+        osc2.stop(ctx.currentTime + 0.24);
       } else {
-        osc.frequency.setValueAtTime(350, ctx.currentTime);
-        gain.gain.setValueAtTime(0.2, ctx.currentTime);
-        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.25);
+        // Low double buzz for warning
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(320, ctx.currentTime);
+        gain.gain.setValueAtTime(0.85, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.28);
+
+        osc.connect(gain);
+        gain.connect(masterGain);
         osc.start(ctx.currentTime);
-        osc.stop(ctx.currentTime + 0.25);
+        osc.stop(ctx.currentTime + 0.28);
       }
     } catch {}
   };
@@ -187,7 +246,7 @@ export const CashierCameraScreen: React.FC<CashierCameraScreenProps> = ({
     return [];
   };
 
-  // Start native camera with reliable mobile initialization & lens selection
+  // Start native camera with HD resolution, Macro & Continuous Autofocus
   const startCamera = async (
     targetFacing: 'environment' | 'user' = facingMode,
     forcedDeviceId?: string
@@ -203,15 +262,16 @@ export const CashierCameraScreen: React.FC<CashierCameraScreenProps> = ({
     let acquiredStream: MediaStream | null = null;
     let lastErr: any = null;
 
-    // 1. If forced lens device ID requested:
+    // 1. If forced lens device ID requested
     if (forcedDeviceId) {
       try {
         acquiredStream = await navigator.mediaDevices.getUserMedia({
           video: {
             deviceId: { exact: forcedDeviceId },
-            width: { ideal: 1280 },
-            height: { ideal: 720 }
-          },
+            width: { ideal: 1920, min: 1280 },
+            height: { ideal: 1080, min: 720 },
+            advanced: [{ focusMode: 'continuous' } as any]
+          } as any,
           audio: false
         });
       } catch (err) {
@@ -219,21 +279,29 @@ export const CashierCameraScreen: React.FC<CashierCameraScreenProps> = ({
       }
     }
 
-    // 2. Progressive constraint fallbacks
+    // 2. High Definition + Continuous Autofocus Constraints
     if (!acquiredStream) {
       const constraintConfigs: MediaStreamConstraints[] = [
         {
           video: {
             facingMode: { ideal: targetFacing },
-            width: { ideal: 1280 },
-            height: { ideal: 720 }
-          },
+            width: { ideal: 1920, min: 1280 },
+            height: { ideal: 1080, min: 720 },
+            advanced: [
+              { focusMode: 'continuous' } as any,
+              { exposureMode: 'continuous' } as any,
+              { whiteBalanceMode: 'continuous' } as any
+            ]
+          } as any,
           audio: false
         },
         {
           video: {
-            facingMode: targetFacing
-          },
+            facingMode: targetFacing,
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+            advanced: [{ focusMode: 'continuous' } as any]
+          } as any,
           audio: false
         },
         {
@@ -279,13 +347,22 @@ export const CashierCameraScreen: React.FC<CashierCameraScreenProps> = ({
     try {
       streamRef.current = acquiredStream;
 
-      // Check if torch/flash is supported on active track
+      // Inspect hardware capabilities: Torch, Zoom, Autofocus
       const videoTrack = acquiredStream.getVideoTracks()[0];
       if (videoTrack) {
         try {
           const capabilities: any = typeof videoTrack.getCapabilities === 'function' ? videoTrack.getCapabilities() : {};
           if (capabilities.torch) {
             setTorchAvailable(true);
+          }
+          if (capabilities.zoom) {
+            setHardwareZoomAvailable(true);
+          }
+          // Enforce continuous autofocus if supported
+          if (capabilities.focusMode && capabilities.focusMode.includes('continuous')) {
+            await videoTrack.applyConstraints({
+              advanced: [{ focusMode: 'continuous' } as any]
+            }).catch(() => {});
           }
         } catch {}
       }
@@ -315,16 +392,27 @@ export const CashierCameraScreen: React.FC<CashierCameraScreenProps> = ({
     }
   };
 
-  // Safe barcode scanner engine: Dual-layer (Native BarcodeDetector -> fallback ZXing continuous without stream killing)
+  // Safe, High-Performance Barcode Scanner Engine (80ms zero-latency cycle)
   const startScannerEngine = (video: HTMLVideoElement) => {
     stopScannerEngine();
     isScanningActiveRef.current = true;
 
-    // LAYER A: Check for native Hardware-Accelerated BarcodeDetector (Chrome/Android built-in standard)
+    // Standard commercial barcodes: exclude noisy formats like ITF to eliminate false scans
+    const standardRetailFormats = [
+      'ean_13',
+      'ean_8',
+      'upc_a',
+      'upc_e',
+      'code_128',
+      'code_39',
+      'qr_code'
+    ];
+
+    // LAYER A: Native Hardware-Accelerated BarcodeDetector (Chrome/Android built-in)
     if (typeof window !== 'undefined' && 'BarcodeDetector' in window) {
       try {
         const barcodeDetector = new (window as any).BarcodeDetector({
-          formats: ['qr_code', 'ean_13', 'ean_8', 'code_128', 'code_39', 'upc_a', 'upc_e', 'data_matrix']
+          formats: standardRetailFormats
         });
 
         let isBusy = false;
@@ -334,35 +422,97 @@ export const CashierCameraScreen: React.FC<CashierCameraScreenProps> = ({
             isBusy = true;
             const detected = await barcodeDetector.detect(video);
             if (detected && detected.length > 0) {
-              const raw = detected[0]?.rawValue;
-              if (raw) handleBarcodeScanned(raw);
+              const raw = detected[0]?.rawValue?.trim();
+              if (raw && raw.length >= 3) {
+                handleBarcodeScanned(raw);
+              }
             }
           } catch {
             // Frame detection error ignored
           } finally {
             isBusy = false;
           }
-        }, 160);
+        }, 80); // 80ms cycle = ~12.5 scans per second for lightning fast detection
         return;
       } catch (err) {
         console.warn('Native BarcodeDetector not available, using ZXing continuous reader:', err);
       }
     }
 
-    // LAYER B: ZXing continuous reader (Decode once per stream session, NEVER calling reset() in loop!)
+    // LAYER B: ZXing continuous reader with tuned retail hints
     try {
       if (!zxingReaderRef.current) {
-        zxingReaderRef.current = new BrowserMultiFormatReader();
+        const hints = new Map();
+        hints.set(DecodeHintType.POSSIBLE_FORMATS, [
+          BarcodeFormat.EAN_13,
+          BarcodeFormat.EAN_8,
+          BarcodeFormat.UPC_A,
+          BarcodeFormat.UPC_E,
+          BarcodeFormat.CODE_128,
+          BarcodeFormat.CODE_39,
+          BarcodeFormat.QR_CODE
+        ]);
+        hints.set(DecodeHintType.TRY_HARDER, true);
+        zxingReaderRef.current = new BrowserMultiFormatReader(hints);
       }
       zxingReaderRef.current.decodeFromVideoElementContinuously(video, (result, err) => {
         if (!isScanningActiveRef.current) return;
         if (result && result.getText()) {
-          handleBarcodeScanned(result.getText());
+          const clean = result.getText().trim();
+          if (clean && clean.length >= 3) {
+            handleBarcodeScanned(clean);
+          }
         }
       });
     } catch (err) {
       console.warn('ZXing decodeFromVideoElementContinuously error:', err);
     }
+  };
+
+  // Zoom control (1x / 1.5x / 2x)
+  const applyZoom = async (level: number) => {
+    setZoomLevel(level);
+    if (!streamRef.current) return;
+    const track = streamRef.current.getVideoTracks()[0];
+    if (!track) return;
+
+    try {
+      if (hardwareZoomAvailable) {
+        await (track as any).applyConstraints({
+          advanced: [{ zoom: level }]
+        });
+      }
+    } catch (err) {
+      console.warn('Hardware zoom error:', err);
+    }
+  };
+
+  const cycleZoom = () => {
+    if (zoomLevel === 1) applyZoom(1.5);
+    else if (zoomLevel === 1.5) applyZoom(2);
+    else applyZoom(1);
+  };
+
+  // Tap on viewfinder to focus
+  const handleTapToFocus = async (e: React.MouseEvent<HTMLDivElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    setFocusRingCoords({ x, y });
+    setTimeout(() => setFocusRingCoords(null), 900);
+
+    if (!streamRef.current) return;
+    const track = streamRef.current.getVideoTracks()[0];
+    if (!track) return;
+
+    try {
+      const caps: any = track.getCapabilities ? track.getCapabilities() : {};
+      if (caps.focusMode && (caps.focusMode.includes('continuous') || caps.focusMode.includes('manual'))) {
+        await (track as any).applyConstraints({
+          advanced: [{ focusMode: 'continuous' } as any]
+        });
+      }
+    } catch {}
   };
 
   // Switch between physical lenses (e.g. multiple back cameras on modern phones)
@@ -413,15 +563,15 @@ export const CashierCameraScreen: React.FC<CashierCameraScreenProps> = ({
     if (!clean) return;
 
     const now = Date.now();
-    // Debounce duplicate scans within 1.6 seconds
-    if (lastScannedBarcodeRef.current === clean && now - lastScanTimestampRef.current < 1600) {
+    // Debounce duplicate scans of SAME barcode within 1.5 seconds
+    if (lastScannedBarcodeRef.current === clean && now - lastScanTimestampRef.current < 1500) {
       return;
     }
 
     lastScannedBarcodeRef.current = clean;
     lastScanTimestampRef.current = now;
 
-    // Check if the scanned barcode is a Station Pairing QR Code from PC screen!
+    // Check if the scanned barcode is a Station Pairing QR Code from PC screen
     try {
       if (clean.includes('IDENIA_POS_PAIRING') || clean.startsWith('{')) {
         const parsed = JSON.parse(clean);
@@ -444,7 +594,7 @@ export const CashierCameraScreen: React.FC<CashierCameraScreenProps> = ({
 
     const phone = user?.phone || db.getUser()?.phone || '';
 
-    // 1. Broadcast to cloud & local PC station
+    // 1. Broadcast to cloud & local PC station immediately
     if (phone) {
       sendStationBarcodeScanInFirebase(phone, stationId, {
         barcode: clean,
@@ -650,6 +800,20 @@ export const CashierCameraScreen: React.FC<CashierCameraScreenProps> = ({
 
         {/* Action Controls */}
         <div className="flex items-center gap-1.5 sm:gap-2">
+          {/* Zoom Toggle Button (1x / 1.5x / 2x) */}
+          <button
+            onClick={cycleZoom}
+            className={`px-2.5 py-1.5 rounded-full backdrop-blur-md text-xs font-black transition-all cursor-pointer flex items-center gap-1 ${
+              zoomLevel > 1
+                ? 'bg-amber-500 text-black shadow-md'
+                : 'bg-white/20 hover:bg-white/30 text-white'
+            }`}
+            title="تقريب الكاميرا لقرأة الباركود بدقة من مسافة مريحة"
+          >
+            <ZoomIn className="w-3.5 h-3.5" />
+            <span>{zoomLevel}x</span>
+          </button>
+
           {/* Switch Rear Lens Button */}
           <button
             onClick={switchRearLens}
@@ -685,7 +849,7 @@ export const CashierCameraScreen: React.FC<CashierCameraScreenProps> = ({
           <button
             onClick={() => setSoundEnabled(prev => !prev)}
             className="p-2 rounded-full bg-white/20 hover:bg-white/30 backdrop-blur-md text-white transition-all cursor-pointer"
-            title={soundEnabled ? 'كتم الصفارة' : 'تشغيل الصفارة'}
+            title={soundEnabled ? 'كتم الصفارة' : 'تشغيل الصفارة (صوت عالي)'}
           >
             {soundEnabled ? <Volume2 className="w-4 h-4 text-emerald-300" /> : <VolumeX className="w-4 h-4 text-gray-400" />}
           </button>
@@ -693,14 +857,35 @@ export const CashierCameraScreen: React.FC<CashierCameraScreenProps> = ({
       </header>
 
       {/* Main Fullscreen Video Viewfinder */}
-      <div className="relative flex-1 w-full h-full min-h-[300px] flex items-center justify-center bg-black overflow-hidden">
+      <div
+        onClick={handleTapToFocus}
+        className="relative flex-1 w-full h-full min-h-[300px] flex items-center justify-center bg-black overflow-hidden cursor-crosshair"
+      >
         <video
           ref={videoRef}
           playsInline
           autoPlay
           muted
+          style={{
+            transform: zoomLevel > 1 && !hardwareZoomAvailable ? `scale(${zoomLevel})` : 'none',
+            transformOrigin: 'center center',
+            transition: 'transform 0.2s ease-out'
+          }}
           className="w-full h-full object-cover min-h-[300px]"
         />
+
+        {/* Tap to Focus Ring Visual Indicator */}
+        {focusRingCoords && (
+          <div
+            className="absolute pointer-events-none w-14 h-14 border-2 border-amber-400 rounded-full animate-ping z-30 flex items-center justify-center"
+            style={{
+              top: focusRingCoords.y - 28,
+              left: focusRingCoords.x - 28
+            }}
+          >
+            <Focus className="w-6 h-6 text-amber-300" />
+          </div>
+        )}
 
         {/* Laser Targeting Viewfinder Overlay */}
         {cameraActive && (
@@ -722,7 +907,7 @@ export const CashierCameraScreen: React.FC<CashierCameraScreenProps> = ({
                 mode === 'sale' ? 'border-emerald-400' : 'border-amber-400'
               }`} />
 
-              {/* Glowing Laser Scan Line */}
+              {/* Glowing Fast Laser Scan Line */}
               <div
                 className={`absolute left-0 right-0 h-0.5 shadow-lg ${
                   mode === 'sale'
@@ -730,13 +915,13 @@ export const CashierCameraScreen: React.FC<CashierCameraScreenProps> = ({
                     : 'bg-amber-400 shadow-amber-400/80'
                 }`}
                 style={{
-                  animation: 'scanLaser 2s ease-in-out infinite alternate'
+                  animation: 'scanLaser 1.5s ease-in-out infinite alternate'
                 }}
               />
 
               {/* Center target dot */}
               <div className="absolute inset-0 flex items-center justify-center">
-                <div className={`w-3 h-3 rounded-full opacity-60 ${
+                <div className={`w-3 h-3 rounded-full opacity-70 ${
                   mode === 'sale' ? 'bg-emerald-400' : 'bg-amber-400'
                 }`} />
               </div>
@@ -749,7 +934,7 @@ export const CashierCameraScreen: React.FC<CashierCameraScreenProps> = ({
                 : 'bg-amber-950/80 border-amber-400/40 text-amber-200'
             }`}>
               {mode === 'sale'
-                ? `🛒 وضع البيع: وجّه الكاميرا لإضافة الصنف لفاتورة محطة (${stationId})`
+                ? `🛒 وضع البيع: وجّه الكاميرا لإضافة الصنف فوراً لفاتورة (${stationId})`
                 : `🔄 وضع الاسترجاع: وجّه الكاميرا لاسترجاع الصنف وإعادته للمخزن (+1)`}
             </p>
           </div>
