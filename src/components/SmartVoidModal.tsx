@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { RotateCcw, PackageCheck, CreditCard, AlertTriangle, X, Check } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { RotateCcw, Package, BadgeDollarSign, X, Check, CheckSquare, Square } from 'lucide-react';
 import { Sale, AppSettings } from '../types';
 
 interface SmartVoidModalProps {
@@ -17,15 +17,38 @@ export const SmartVoidModal: React.FC<SmartVoidModalProps> = ({
   onClose,
   onConfirmVoid
 }) => {
-  const [selectedMode, setSelectedMode] = useState<'all' | 'items_only' | 'payment_only'>('all');
+  // Two distinct checkboxes as requested by the user:
+  // 1. voidItems: Return products to inventory
+  // 2. voidDebtPayment: Void debt payment / debt settlement
+  const [voidItems, setVoidItems] = useState(false);
+  const [voidDebtPayment, setVoidDebtPayment] = useState(false);
+
+  // Reset checkboxes whenever modal opens or sale changes
+  useEffect(() => {
+    if (isOpen) {
+      setVoidItems(false);
+      setVoidDebtPayment(false);
+    }
+  }, [isOpen, sale?.id]);
 
   if (!isOpen || !sale) return null;
 
-  const hasExcessPayment = (sale.paid_towards_previous_debt || 0) > 0 || (sale.paid_amount > sale.total);
-  const hasItems = sale.items && sale.items.length > 0;
+  const excessPayment = sale.paid_towards_previous_debt || Math.max(0, sale.paid_amount - sale.total);
+  const isAnyOptionSelected = voidItems || voidDebtPayment;
 
   const handleConfirm = () => {
-    onConfirmVoid(sale.id, selectedMode);
+    if (!isAnyOptionSelected) return;
+
+    let mode: 'all' | 'items_only' | 'payment_only' = 'all';
+    if (voidItems && voidDebtPayment) {
+      mode = 'all';
+    } else if (voidItems && !voidDebtPayment) {
+      mode = 'items_only';
+    } else if (!voidItems && voidDebtPayment) {
+      mode = 'payment_only';
+    }
+
+    onConfirmVoid(sale.id, mode);
     onClose();
   };
 
@@ -35,12 +58,12 @@ export const SmartVoidModal: React.FC<SmartVoidModalProps> = ({
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 bg-red-50 dark:bg-red-950/40 border-b border-red-100 dark:border-red-900/50">
           <div className="flex items-center gap-2.5 text-red-700 dark:text-red-400">
-            <div className="w-9 h-9 rounded-xl bg-red-100 dark:bg-red-900/60 flex items-center justify-center">
+            <div className="w-10 h-10 rounded-2xl bg-red-100 dark:bg-red-900/60 flex items-center justify-center">
               <RotateCcw className="w-5 h-5 text-red-600 dark:text-red-400" />
             </div>
             <div>
               <h3 className="font-black text-base">إلغاء واسترجاع الفاتورة الذكي</h3>
-              <p className="text-[11px] text-red-600/80 dark:text-red-300">
+              <p className="text-xs text-red-600/80 dark:text-red-300">
                 فاتورة رقم: <span className="font-mono font-bold">{sale.invoice_number}</span> ({sale.customer_name})
               </p>
             </div>
@@ -53,7 +76,7 @@ export const SmartVoidModal: React.FC<SmartVoidModalProps> = ({
           </button>
         </div>
 
-        {/* Content & Choices */}
+        {/* Invoice Summary Box */}
         <div className="p-6 space-y-4">
           <div className="bg-gray-50 dark:bg-zinc-900/80 p-3.5 rounded-2xl border border-gray-200 dark:border-gray-800 text-xs text-gray-700 dark:text-gray-300 space-y-1.5">
             <div className="flex justify-between font-bold">
@@ -64,80 +87,86 @@ export const SmartVoidModal: React.FC<SmartVoidModalProps> = ({
               <span>المبلغ المدفوع من العميل:</span>
               <span className="font-bold text-emerald-600">{sale.paid_amount.toFixed(2)} {settings.currency_symbol}</span>
             </div>
-            {hasExcessPayment && (
+            {excessPayment > 0 && (
               <div className="flex justify-between text-amber-600 dark:text-amber-400 font-bold border-t border-gray-200 dark:border-gray-700 pt-1.5">
-                <span>سداد من الحساب السابق:</span>
-                <span>{(sale.paid_towards_previous_debt || (sale.paid_amount - sale.total)).toFixed(2)} {settings.currency_symbol}</span>
+                <span>سداد من الحساب السابق (دين):</span>
+                <span>{excessPayment.toFixed(2)} {settings.currency_symbol}</span>
+              </div>
+            )}
+            {sale.remaining_amount > 0 && (
+              <div className="flex justify-between text-red-600 dark:text-red-400 font-bold border-t border-gray-200 dark:border-gray-700 pt-1.5">
+                <span>متبقي آجل مسجل كدين:</span>
+                <span>{sale.remaining_amount.toFixed(2)} {settings.currency_symbol}</span>
               </div>
             )}
           </div>
 
-          <div className="space-y-2.5">
+          {/* 2 Selective Checkboxes */}
+          <div className="space-y-3">
             <label className="text-xs font-black text-gray-800 dark:text-gray-200 block">
-              اختر نوع الإلغاء المطلوب تنفيذه:
+              حدد العمليات المراد إلغاؤها (يمكنك تحديد خيار أو كلاهما معاً):
             </label>
 
-            {/* Option 1: Void All */}
+            {/* Checkbox 1: Void Items / Stock Return */}
             <div
-              onClick={() => setSelectedMode('all')}
-              className={`p-3.5 rounded-2xl border-2 transition-all cursor-pointer flex items-start gap-3 ${
-                selectedMode === 'all'
-                  ? 'border-red-500 bg-red-50/70 dark:bg-red-950/40 text-red-900 dark:text-red-200 shadow-xs'
+              onClick={() => setVoidItems(!voidItems)}
+              className={`p-4 rounded-2xl border-2 transition-all cursor-pointer flex items-start gap-3 select-none ${
+                voidItems
+                  ? 'border-emerald-500 bg-emerald-50/70 dark:bg-emerald-950/40 text-emerald-950 dark:text-emerald-200 shadow-xs'
                   : 'border-gray-200 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-zinc-900 text-gray-700 dark:text-gray-300'
               }`}
             >
-              <div className="w-5 h-5 rounded-full border-2 border-red-500 mt-0.5 flex items-center justify-center shrink-0">
-                {selectedMode === 'all' && <div className="w-2.5 h-2.5 rounded-full bg-red-500" />}
+              <div className="mt-0.5 shrink-0 text-emerald-600 dark:text-emerald-400">
+                {voidItems ? (
+                  <CheckSquare className="w-5 h-5" />
+                ) : (
+                  <Square className="w-5 h-5 text-gray-400" />
+                )}
               </div>
-              <div className="space-y-0.5">
-                <div className="font-black text-xs">إلغاء الفاتورة بالكامل (استرجاع البضاعة + إلغاء الدفع)</div>
-                <div className="text-[11px] text-gray-500 dark:text-gray-400">
-                  إرجاع جميع الأصناف المباعة إلى رصيد المخزن فوراً وإلغاء أي دفعات مسجلة مع الفاتورة.
+              <div className="space-y-1">
+                <div className="font-black text-xs flex items-center gap-1.5">
+                  <Package className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>1. استرجاع المشتريات إلى المخزن</span>
+                </div>
+                <div className="text-[11px] text-gray-500 dark:text-gray-400 leading-relaxed">
+                  إعادة جميع الأصناف المباعة في هذه الفاتورة ({sale.items_count || sale.items?.length || 0} قطعة) فوراً إلى كميات المخزن ورصيد الأصناف.
                 </div>
               </div>
             </div>
 
-            {/* Option 2: Void Items Only (Keep Debt Payment) */}
-            {hasExcessPayment && (
-              <div
-                onClick={() => setSelectedMode('items_only')}
-                className={`p-3.5 rounded-2xl border-2 transition-all cursor-pointer flex items-start gap-3 ${
-                  selectedMode === 'items_only'
-                    ? 'border-amber-500 bg-amber-50/70 dark:bg-amber-950/40 text-amber-900 dark:text-amber-200 shadow-xs'
-                    : 'border-gray-200 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-zinc-900 text-gray-700 dark:text-gray-300'
-                }`}
-              >
-                <div className="w-5 h-5 rounded-full border-2 border-amber-500 mt-0.5 flex items-center justify-center shrink-0">
-                  {selectedMode === 'items_only' && <div className="w-2.5 h-2.5 rounded-full bg-amber-500" />}
+            {/* Checkbox 2: Void Debt / Payment */}
+            <div
+              onClick={() => setVoidDebtPayment(!voidDebtPayment)}
+              className={`p-4 rounded-2xl border-2 transition-all cursor-pointer flex items-start gap-3 select-none ${
+                voidDebtPayment
+                  ? 'border-amber-500 bg-amber-50/70 dark:bg-amber-950/40 text-amber-950 dark:text-amber-200 shadow-xs'
+                  : 'border-gray-200 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-zinc-900 text-gray-700 dark:text-gray-300'
+              }`}
+            >
+              <div className="mt-0.5 shrink-0 text-amber-600 dark:text-amber-400">
+                {voidDebtPayment ? (
+                  <CheckSquare className="w-5 h-5" />
+                ) : (
+                  <Square className="w-5 h-5 text-gray-400" />
+                )}
+              </div>
+              <div className="space-y-1">
+                <div className="font-black text-xs flex items-center gap-1.5">
+                  <BadgeDollarSign className="w-3.5 h-3.5 text-amber-600" />
+                  <span>2. إلغاء تسديد الدين والمعاملة المالية</span>
                 </div>
-                <div className="space-y-0.5">
-                  <div className="font-black text-xs">إلغاء المشتريات فقط (مع تثبيت سداد الدين)</div>
-                  <div className="text-[11px] text-gray-500 dark:text-gray-400">
-                    استرجاع البضاعة للمخزن وتثبيت دفعة الـ {(sale.paid_towards_previous_debt || (sale.paid_amount - sale.total)).toFixed(2)} {settings.currency_symbol} كدفعة سداد لدينه السابق.
-                  </div>
+                <div className="text-[11px] text-gray-500 dark:text-gray-400 leading-relaxed">
+                  {excessPayment > 0
+                    ? `إلغاء دفعة سداد الدين (${excessPayment.toFixed(2)} ${settings.currency_symbol}) وإعادتها لحساب العميل.`
+                    : `إلغاء المعاملة المالية والديون المسجلة مع هذه الفاتورة في حساب العميل.`}
                 </div>
               </div>
-            )}
+            </div>
 
-            {/* Option 3: Void Payment Only */}
-            {hasExcessPayment && (
-              <div
-                onClick={() => setSelectedMode('payment_only')}
-                className={`p-3.5 rounded-2xl border-2 transition-all cursor-pointer flex items-start gap-3 ${
-                  selectedMode === 'payment_only'
-                    ? 'border-blue-500 bg-blue-50/70 dark:bg-blue-950/40 text-blue-900 dark:text-blue-200 shadow-xs'
-                    : 'border-gray-200 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-zinc-900 text-gray-700 dark:text-gray-300'
-                }`}
-              >
-                <div className="w-5 h-5 rounded-full border-2 border-blue-500 mt-0.5 flex items-center justify-center shrink-0">
-                  {selectedMode === 'payment_only' && <div className="w-2.5 h-2.5 rounded-full bg-blue-500" />}
-                </div>
-                <div className="space-y-0.5">
-                  <div className="font-black text-xs">إلغاء سداد الدين فقط (مع الإبقاء على المشتريات)</div>
-                  <div className="text-[11px] text-gray-500 dark:text-gray-400">
-                    الإبقاء على بيع الأصناف وإلغاء دفعة سداد الدين الإضافية من حساب العميل.
-                  </div>
-                </div>
+            {voidItems && voidDebtPayment && (
+              <div className="p-2.5 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900/60 rounded-xl text-[11px] font-bold text-red-700 dark:text-red-300 flex items-center gap-1.5">
+                <RotateCcw className="w-3.5 h-3.5 shrink-0" />
+                <span>سيتم إلغاء الفاتورة بالكامل (استرجاع البضاعة للمخزن + إلغاء الدفعات).</span>
               </div>
             )}
           </div>
@@ -155,8 +184,13 @@ export const SmartVoidModal: React.FC<SmartVoidModalProps> = ({
 
           <button
             type="button"
+            disabled={!isAnyOptionSelected}
             onClick={handleConfirm}
-            className="px-6 py-2.5 text-xs font-black text-white bg-red-600 hover:bg-red-700 active:scale-98 rounded-xl shadow-md transition-all flex items-center gap-1.5 cursor-pointer"
+            className={`px-6 py-2.5 text-xs font-black rounded-xl transition-all flex items-center gap-1.5 ${
+              isAnyOptionSelected
+                ? 'text-white bg-red-600 hover:bg-red-700 active:scale-98 shadow-md cursor-pointer'
+                : 'text-gray-400 bg-gray-200 dark:bg-zinc-800 dark:text-gray-500 cursor-not-allowed opacity-60'
+            }`}
           >
             <Check className="w-4 h-4" />
             <span>تأكيد تنفيذ الإلغاء</span>

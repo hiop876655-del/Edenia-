@@ -232,7 +232,20 @@ export const ThermalReceiptModal: React.FC<ThermalReceiptModalProps> = ({
               {onVoid && (
                 <button
                   type="button"
-                  onClick={() => setIsVoidModalOpen(true)}
+                  onClick={() => {
+                    const hasCompoundActions = Boolean(
+                      (sale.paid_towards_previous_debt && sale.paid_towards_previous_debt > 0) ||
+                      (sale.customer_id && sale.payment_type === 'debt' && sale.paid_amount > 0 && sale.remaining_amount > 0) ||
+                      (sale.customer_id && sale.paid_amount > sale.total)
+                    );
+
+                    if (hasCompoundActions) {
+                      setIsVoidModalOpen(true);
+                    } else {
+                      onVoid(sale.id, 'all');
+                      onClose();
+                    }
+                  }}
                   className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900/60 hover:bg-red-100 dark:hover:bg-red-900/60 rounded-xl transition-colors cursor-pointer"
                   title="إلغاء الفاتورة واسترجاع البضاعة"
                 >

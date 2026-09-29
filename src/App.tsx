@@ -281,15 +281,17 @@ export function App() {
     if (user?.phone) {
       try {
         const myDeviceId = getDeviceId();
-        unsubscribeDataSync = subscribeToMerchantDataSnapshotInFirebase(user.phone, ({ data, updatedByDeviceId }) => {
+        unsubscribeDataSync = subscribeToMerchantDataSnapshotInFirebase(user.phone, ({ data, updatedAt, updatedByDeviceId }) => {
           if (updatedByDeviceId && updatedByDeviceId === myDeviceId) {
-            // Initiated locally, already up to date
+            // Initiated locally, already saved locally
             return;
           }
           if (data) {
             // Remote update arrived from another device -> update local store and trigger UI refresh!
-            db.restoreStoreData(data);
-            window.dispatchEvent(new CustomEvent('idenia_db_changed', { detail: { timestamp: Date.now(), fromRemote: true } }));
+            const restored = db.restoreStoreData(data, updatedAt);
+            if (restored) {
+              window.dispatchEvent(new CustomEvent('idenia_db_changed', { detail: { timestamp: Date.now(), fromRemote: true } }));
+            }
           }
         });
       } catch (err) {
@@ -305,11 +307,11 @@ export function App() {
     };
     syncMerchantData();
 
-    // Run periodic cloud check every 10 seconds as backup
+    // Run periodic cloud check every 15 seconds as backup
     const interval = setInterval(() => {
       localCheck();
       syncCloudStatus();
-    }, 10000);
+    }, 15000);
 
     // Sync business data periodically
     const dataSyncInterval = setInterval(syncMerchantData, 30000);
@@ -328,7 +330,7 @@ export function App() {
       clearInterval(dataSyncInterval);
       window.removeEventListener('online', handleOnline);
     };
-  }, [license, user, currentScreen]);
+  }, [license, user?.phone]);
 
   // Keyboard Shortcuts (F1 - F7) for Windows Desktop
   useEffect(() => {

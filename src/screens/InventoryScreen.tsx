@@ -47,6 +47,9 @@ export const InventoryScreen: React.FC<InventoryScreenProps> = ({
 
   useEffect(() => {
     loadData();
+    const handleDbChanged = () => loadData();
+    window.addEventListener('idenia_db_changed', handleDbChanged);
+    return () => window.removeEventListener('idenia_db_changed', handleDbChanged);
   }, []);
 
   const categories = ['الكل', ...Array.from(new Set(products.map(p => p.category)))];

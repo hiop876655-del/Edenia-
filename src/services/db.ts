@@ -66,6 +66,7 @@ class LocalDatabase {
   }
 
   public triggerCloudSync() {
+    this.markLocalWrite();
     if (typeof window !== 'undefined') {
       try {
         window.dispatchEvent(new CustomEvent('idenia_db_changed', { detail: { timestamp: Date.now() } }));
@@ -293,23 +294,20 @@ class LocalDatabase {
     const total = Math.max(0, subtotal - discount);
     const totalProfit = processedItems.reduce((sum, it) => sum + it.profit, 0) - discount;
 
-    let paidAmount = total;
-    let remainingAmount = 0;
-
     const isCredit = saleData.payment_type === 'credit' || saleData.payment_type === 'debt';
-
-    if (!isCredit) {
-      paidAmount = total;
-      remainingAmount = 0;
-    } else {
-      paidAmount = Number(saleData.paid_amount) || 0;
-      remainingAmount = Math.max(0, total - paidAmount);
-
-      if (!saleData.customer_name) {
-        return { success: false, error: 'البيع الآجل يتطلب تحديد اسم العميل.' };
-      }
+    let paidAmount = Number(saleData.paid_amount);
+    if (isNaN(paidAmount) || paidAmount === undefined) {
+      paidAmount = isCredit ? 0 : total;
     }
 
+    // Remaining unpaid amount for this specific invoice
+    const remainingAmount = Math.max(0, total - paidAmount);
+
+    if (isCredit && !saleData.customer_name && !saleData.customer_id) {
+      return { success: false, error: 'البيع الآجل يتطلب تحديد اسم العميل أو اختياره.' };
+    }
+
+    // Deduct stock from inventory
     for (const item of saleData.items) {
       const prodIndex = products.findIndex(p => p.id === item.product_id);
       if (prodIndex !== -1) {
@@ -332,6 +330,7 @@ class LocalDatabase {
     }
     this.set(STORAGE_KEYS.PRODUCTS, products);
 
+    // Resolve or create customer
     let finalCustomerId = saleData.customer_id;
     const trimmedCustomerName = (saleData.customer_name || '').trim();
 
@@ -357,14 +356,14 @@ class LocalDatabase {
       const debtCustName = trimmedCustomerName || 'عميل مسجل';
 
       if (remainingAmount > 0) {
-        // Customer paid less than total -> add remaining debt (e.g. total 110, paid 50 -> remaining 60 goes to debt)
+        // Customer has unpaid remainder on this invoice (e.g. total 110, paid 50 -> remainder 60 is added as new debt)
         this.addDebt({
           customer_id: finalCustomerId,
           customer_name: debtCustName,
           sale_id: saleId,
-          amount: total,
-          paid_amount: paidAmount,
-          notes: `متبقي من فاتورة ${invoiceNumber}`
+          amount: remainingAmount, // The exact net unpaid debt amount added to balance
+          paid_amount: 0,
+          notes: `متبقي من فاتورة ${invoiceNumber} (قيمة الأصناف: ${total} - مسدد نقداً: ${paidAmount})`
         });
       } else if (paidAmount > total) {
         // Customer paid more than invoice total (e.g. invoice total 100, paid 200)
@@ -374,13 +373,13 @@ class LocalDatabase {
           customer_id: finalCustomerId,
           customer_name: debtCustName,
           amount: paidTowardsPreviousDebt,
-          notes: `سداد من فائض فاتورة ${invoiceNumber} (مقدم ${paidAmount} - فاتورة ${total})`
+          notes: `سداد من فائض فاتورة ${invoiceNumber} (مدفوع ${paidAmount} - فاتورة ${total})`
         });
       }
     }
 
     const updatedCustomer = finalCustomerId ? this.getCustomerById(finalCustomerId) : null;
-    const finalBalance = updatedCustomer ? updatedCustomer.remaining_debt : (previousBalance + remainingAmount);
+    const finalBalance = updatedCustomer ? updatedCustomer.remaining_debt : Math.max(0, previousBalance + remainingAmount - paidTowardsPreviousDebt);
 
     const newSale: Sale = {
       id: saleId,
@@ -472,16 +471,25 @@ class LocalDatabase {
     }
 
     // 3. Remove or update sales list
+    const updatedCustomer = targetSale.customer_id ? this.getCustomerById(targetSale.customer_id) : null;
+    const currentCustDebt = updatedCustomer ? updatedCustomer.remaining_debt : 0;
+
     if (mode === 'all') {
       sales.splice(saleIndex, 1);
     } else if (mode === 'items_only') {
       targetSale.void_status = 'items_voided';
       targetSale.total = 0;
+      targetSale.subtotal = 0;
+      targetSale.profit = 0;
       targetSale.items = [];
+      targetSale.remaining_amount = 0;
+      targetSale.final_balance = currentCustDebt;
     } else if (mode === 'payment_only') {
       targetSale.void_status = 'payment_voided';
+      // Reset paid amount on this invoice back to items cost only (e.g. from 200 to 110)
       targetSale.paid_amount = targetSale.total;
       targetSale.paid_towards_previous_debt = 0;
+      targetSale.final_balance = currentCustDebt;
     }
     this.set(STORAGE_KEYS.SALES, sales);
     this.triggerCloudSync();
@@ -490,7 +498,7 @@ class LocalDatabase {
     if (mode === 'items_only') {
       message = `تم استرجاع البضاعة للمخزن وتثبيت دفعة سداد الدين في حساب العميل بنجاح.`;
     } else if (mode === 'payment_only') {
-      message = `تم إلغاء دفعة سداد الدين مع الإبقاء على مبيعات الفاتورة.`;
+      message = `تم إلغاء دفعة سداد الدين وتعديل الفاتورة وإعادة رصيد الدين إلى حساب العميل بنجاح.`;
     }
 
     return { success: true, message };
@@ -733,23 +741,6 @@ class LocalDatabase {
     payments.unshift(newPayment);
     this.set(STORAGE_KEYS.DEBT_PAYMENTS, payments);
 
-    const debts = this.getDebts();
-    let remainingToDistribute = amount;
-
-    const customerDebts = debts
-      .filter(d => d.customer_id === customer_id && d.remaining_amount > 0)
-      .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
-
-    for (const debt of customerDebts) {
-      if (remainingToDistribute <= 0) break;
-      const canPay = Math.min(debt.remaining_amount, remainingToDistribute);
-      debt.paid_amount += canPay;
-      debt.remaining_amount -= canPay;
-      debt.status = debt.remaining_amount === 0 ? 'paid' : 'partial';
-      remainingToDistribute -= canPay;
-    }
-
-    this.set(STORAGE_KEYS.DEBTS, debts);
     this.recalculateCustomerDebt(customer_id);
     this.triggerCloudSync();
 
@@ -757,13 +748,46 @@ class LocalDatabase {
   }
 
   public recalculateCustomerDebt(customerId: string) {
-    const debts = this.getDebts().filter(d => d.customer_id === customerId);
-    const payments = this.getDebtPayments().filter(p => p.customer_id === customerId);
+    const allDebts = this.getDebts();
+    const allPayments = this.getDebtPayments();
 
-    // Sum of remaining amounts across customer debts
-    const remainingDebt = debts.reduce((sum, d) => sum + (Number(d.remaining_amount) || 0), 0);
-    const totalDebt = debts.reduce((sum, d) => sum + (Number(d.amount) || 0), 0);
-    const totalPaid = Math.max(0, totalDebt - remainingDebt);
+    const customerDebts = allDebts
+      .filter(d => d.customer_id === customerId)
+      .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+
+    const customerPayments = allPayments
+      .filter(p => p.customer_id === customerId)
+      .sort((a, b) => new Date(a.payment_date).getTime() - new Date(b.payment_date).getTime());
+
+    // Reset all customer debts to original debt amounts
+    for (const d of customerDebts) {
+      d.paid_amount = 0;
+      d.remaining_amount = Number(d.amount) || 0;
+      d.status = d.remaining_amount === 0 ? 'paid' : 'unpaid';
+    }
+
+    // Chronologically apply all active payments
+    for (const pay of customerPayments) {
+      let payRemaining = Number(pay.amount) || 0;
+      for (const debt of customerDebts) {
+        if (payRemaining <= 0) break;
+        if (debt.remaining_amount > 0) {
+          const canPay = Math.min(debt.remaining_amount, payRemaining);
+          debt.paid_amount += canPay;
+          debt.remaining_amount -= canPay;
+          debt.status = debt.remaining_amount === 0 ? 'paid' : 'partial';
+          payRemaining -= canPay;
+        }
+      }
+    }
+
+    // Save updated debts
+    this.set(STORAGE_KEYS.DEBTS, allDebts);
+
+    // Calculate customer profile totals
+    const remainingDebt = customerDebts.reduce((sum, d) => sum + (Number(d.remaining_amount) || 0), 0);
+    const totalDebt = customerDebts.reduce((sum, d) => sum + (Number(d.amount) || 0), 0);
+    const totalPaid = customerPayments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
 
     const customers = this.getCustomers();
     const idx = customers.findIndex(c => c.id === customerId);
@@ -932,16 +956,54 @@ class LocalDatabase {
     }
   }
 
-  public restoreStoreData(data: any): boolean {
+  private lastLocalWriteTimestamp: number = Date.now();
+
+  public markLocalWrite() {
+    this.lastLocalWriteTimestamp = Date.now();
+  }
+
+  public restoreStoreData(data: any, remoteTimestamp?: number): boolean {
     if (!data) return false;
     try {
-      if (Array.isArray(data.products)) this.set(STORAGE_KEYS.PRODUCTS, data.products);
-      if (Array.isArray(data.sales)) this.set(STORAGE_KEYS.SALES, data.sales);
-      if (Array.isArray(data.customers)) this.set(STORAGE_KEYS.CUSTOMERS, data.customers);
-      if (Array.isArray(data.debts)) this.set(STORAGE_KEYS.DEBTS, data.debts);
-      if (Array.isArray(data.debt_payments)) this.set(STORAGE_KEYS.DEBT_PAYMENTS, data.debt_payments);
-      if (Array.isArray(data.stock_movements)) this.set(STORAGE_KEYS.STOCK_MOVEMENTS, data.stock_movements);
-      if (data.settings && typeof data.settings === 'object') this.set(STORAGE_KEYS.SETTINGS, data.settings);
+      // If remote timestamp is older than recent local write (within last 3 seconds), keep local state
+      if (remoteTimestamp && (Date.now() - this.lastLocalWriteTimestamp < 3000) && remoteTimestamp < this.lastLocalWriteTimestamp) {
+        return false;
+      }
+
+      const currentProducts = this.getProducts();
+      if (Array.isArray(data.products)) {
+        // Protect against accidental wipe: if local has products but remote is empty and was older, keep local
+        if (data.products.length > 0 || currentProducts.length === 0) {
+          this.set(STORAGE_KEYS.PRODUCTS, data.products);
+        }
+      }
+
+      const currentSales = this.getSales();
+      if (Array.isArray(data.sales)) {
+        if (data.sales.length > 0 || currentSales.length === 0) {
+          this.set(STORAGE_KEYS.SALES, data.sales);
+        }
+      }
+
+      const currentCustomers = this.getCustomers();
+      if (Array.isArray(data.customers)) {
+        if (data.customers.length > 0 || currentCustomers.length === 0) {
+          this.set(STORAGE_KEYS.CUSTOMERS, data.customers);
+        }
+      }
+
+      if (Array.isArray(data.debts)) {
+        this.set(STORAGE_KEYS.DEBTS, data.debts);
+      }
+      if (Array.isArray(data.debt_payments)) {
+        this.set(STORAGE_KEYS.DEBT_PAYMENTS, data.debt_payments);
+      }
+      if (Array.isArray(data.stock_movements)) {
+        this.set(STORAGE_KEYS.STOCK_MOVEMENTS, data.stock_movements);
+      }
+      if (data.settings && typeof data.settings === 'object') {
+        this.set(STORAGE_KEYS.SETTINGS, data.settings);
+      }
       return true;
     } catch (err) {
       console.warn('Error restoring store data:', err);

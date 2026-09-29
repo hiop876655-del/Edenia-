@@ -57,6 +57,9 @@ export const SalesScreen: React.FC<SalesScreenProps> = ({ onShowReceipt }) => {
 
   useEffect(() => {
     loadData();
+    const handleDbChanged = () => loadData();
+    window.addEventListener('idenia_db_changed', handleDbChanged);
+    return () => window.removeEventListener('idenia_db_changed', handleDbChanged);
   }, []);
 
   // Listen for barcode scan events from external scanners, camera cashier screen, or other tabs
@@ -615,10 +618,10 @@ export const SalesScreen: React.FC<SalesScreenProps> = ({ onShowReceipt }) => {
               </div>
 
               {/* Total Calculation Display */}
-              <div className="p-3 bg-gray-50 dark:bg-zinc-900 rounded-2xl space-y-1.5 text-xs">
-                <div className="flex justify-between text-gray-500">
-                  <span>المجموع الإجمالي:</span>
-                  <span>{subtotal.toFixed(2)} {settings.currency_symbol}</span>
+              <div className="p-3.5 bg-gray-50 dark:bg-zinc-900 rounded-2xl space-y-2 text-xs">
+                <div className="flex justify-between text-gray-500 dark:text-gray-400">
+                  <span>المجموع الإجمالي للأصناف:</span>
+                  <span className="font-bold">{subtotal.toFixed(2)} {settings.currency_symbol}</span>
                 </div>
                 {discount > 0 && (
                   <div className="flex justify-between text-red-500 font-bold">
@@ -627,28 +630,44 @@ export const SalesScreen: React.FC<SalesScreenProps> = ({ onShowReceipt }) => {
                   </div>
                 )}
                 <div className="flex justify-between text-sm font-black text-gray-900 dark:text-white border-t border-gray-200 dark:border-gray-800 pt-1.5">
-                  <span>الصافي المطلوب:</span>
+                  <span>صافي الفاتورة الحالية:</span>
                   <span className="text-[#2E7D32] dark:text-[#66BB6A]">{total.toFixed(2)} {settings.currency_symbol}</span>
                 </div>
-                {paymentType === 'debt' && (
-                  <>
-                    {paidAmount < total ? (
-                      <div className="flex justify-between text-xs font-bold text-amber-600 border-t border-gray-200 dark:border-gray-800 pt-1">
-                        <span>المتبقي الآجل للدين:</span>
-                        <span>{remaining.toFixed(2)} {settings.currency_symbol}</span>
-                      </div>
-                    ) : paidAmount > total ? (
-                      <div className="flex justify-between text-xs font-bold text-emerald-600 border-t border-gray-200 dark:border-gray-800 pt-1">
-                        <span>سداد لحساب قديم (فائض):</span>
-                        <span>- {(paidAmount - total).toFixed(2)} {settings.currency_symbol}</span>
-                      </div>
-                    ) : (
-                      <div className="flex justify-between text-xs font-bold text-emerald-600 border-t border-gray-200 dark:border-gray-800 pt-1">
-                        <span>مسدد بالكامل:</span>
-                        <span>0.00 {settings.currency_symbol}</span>
-                      </div>
-                    )}
-                  </>
+
+                {/* Smart Customer Account Analysis */}
+                {selectedCustomerId && currentCustDebt > 0 && (
+                  <div className="flex justify-between text-amber-700 dark:text-amber-400 font-bold bg-amber-50/70 dark:bg-amber-950/40 p-1.5 rounded-lg border border-amber-200 dark:border-amber-800/60">
+                    <span>حساب العميل السابق:</span>
+                    <span>{currentCustDebt.toFixed(2)} {settings.currency_symbol}</span>
+                  </div>
+                )}
+
+                {paidAmount > 0 && (
+                  <div className="flex justify-between text-emerald-700 dark:text-emerald-400 font-bold">
+                    <span>المبلغ المستلم الآن:</span>
+                    <span>{paidAmount.toFixed(2)} {settings.currency_symbol}</span>
+                  </div>
+                )}
+
+                {paidAmount < total ? (
+                  <div className="flex justify-between text-xs font-bold text-amber-600 dark:text-amber-400 border-t border-gray-200 dark:border-gray-800 pt-1">
+                    <span>يُضاف لدين العميل (متبقي الفاتورة):</span>
+                    <span>+ {(total - paidAmount).toFixed(2)} {settings.currency_symbol}</span>
+                  </div>
+                ) : paidAmount > total ? (
+                  <div className="flex justify-between text-xs font-bold text-emerald-600 dark:text-emerald-400 border-t border-gray-200 dark:border-gray-800 pt-1">
+                    <span>يُخصم من الدين القديم (فائض نقدية):</span>
+                    <span>- {(paidAmount - total).toFixed(2)} {settings.currency_symbol}</span>
+                  </div>
+                ) : null}
+
+                {selectedCustomerId && (
+                  <div className="flex justify-between font-extrabold text-xs pt-1.5 border-t border-dashed border-gray-300 dark:border-gray-700 text-gray-900 dark:text-white">
+                    <span>إجمالي حساب العميل النهائي:</span>
+                    <span className={(currentCustDebt + Math.max(0, total - paidAmount) - Math.max(0, paidAmount - total)) > 0 ? 'text-red-600 dark:text-red-400 font-black' : 'text-emerald-600 font-black'}>
+                      {Math.max(0, currentCustDebt + Math.max(0, total - paidAmount) - Math.max(0, paidAmount - total)).toFixed(2)} {settings.currency_symbol}
+                    </span>
+                  </div>
                 )}
               </div>
 
@@ -727,7 +746,27 @@ export const SalesScreen: React.FC<SalesScreenProps> = ({ onShowReceipt }) => {
 
                         <button
                           type="button"
-                          onClick={() => setSaleToVoid(sale)}
+                          onClick={() => {
+                            const hasCompoundActions = Boolean(
+                              (sale.paid_towards_previous_debt && sale.paid_towards_previous_debt > 0) ||
+                              (sale.customer_id && sale.payment_type === 'debt' && sale.paid_amount > 0 && sale.remaining_amount > 0) ||
+                              (sale.customer_id && sale.paid_amount > sale.total)
+                            );
+
+                            if (hasCompoundActions) {
+                              setSaleToVoid(sale);
+                            } else {
+                              const res = db.voidInvoice(sale.id, 'all');
+                              if (res.success) {
+                                setSuccessMessage(res.message);
+                                loadData();
+                                setTimeout(() => setSuccessMessage(null), 3500);
+                              } else {
+                                setErrorMessage(res.message);
+                                setTimeout(() => setErrorMessage(null), 3000);
+                              }
+                            }
+                          }}
                           className="p-1.5 text-red-500 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/40 rounded-lg cursor-pointer transition-colors"
                           title="إلغاء الفاتورة واسترجاع الأصناف للمخزن"
                         >

@@ -51,6 +51,9 @@ export const ProductsScreen: React.FC<ProductsScreenProps> = ({
 
   useEffect(() => {
     loadData();
+    const handleDbChanged = () => loadData();
+    window.addEventListener('idenia_db_changed', handleDbChanged);
+    return () => window.removeEventListener('idenia_db_changed', handleDbChanged);
   }, []);
 
   useEffect(() => {

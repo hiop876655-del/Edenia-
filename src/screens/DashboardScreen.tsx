@@ -41,10 +41,17 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
   const [settings, setSettings] = useState<AppSettings>(db.getSettings());
   const [recentSales, setRecentSales] = useState<Sale[]>(db.getSales().slice(0, 5));
 
-  useEffect(() => {
+  const loadDashboardData = () => {
     setStats(db.getDashboardStats());
     setSettings(db.getSettings());
     setRecentSales(db.getSales().slice(0, 5));
+  };
+
+  useEffect(() => {
+    loadDashboardData();
+    const handleDbChanged = () => loadDashboardData();
+    window.addEventListener('idenia_db_changed', handleDbChanged);
+    return () => window.removeEventListener('idenia_db_changed', handleDbChanged);
   }, []);
 
   const statCards = [
