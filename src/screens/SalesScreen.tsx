@@ -55,6 +55,14 @@ export const SalesScreen: React.FC<SalesScreenProps> = ({ onShowReceipt }) => {
   const [discount, setDiscount] = useState<number>(0);
   const [paidAmount, setPaidAmount] = useState<number>(0);
   const [notes, setNotes] = useState<string>('');
+  const [editingSale, setEditingSale] = useState<Sale | null>(() => {
+    try {
+      const saved = localStorage.getItem('idenia_pos_active_editing_sale');
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  });
 
   // Search & Barcode
   const [productSearch, setProductSearch] = useState('');
@@ -291,22 +299,14 @@ export const SalesScreen: React.FC<SalesScreenProps> = ({ onShowReceipt }) => {
   const handleRecallInvoiceForEdit = (saleToRecall: Sale) => {
     if (!saleToRecall || !saleToRecall.items) return;
 
-    if (cart.length > 0) {
+    if (cart.length > 0 && !editingSale) {
       const confirmReplace = window.confirm(
         `توجد أصناف حالية بداخل الكاشير (${cart.length} صنف).\nهل تريد استبدالها بأصناف الفاتورة رقم (#${saleToRecall.invoice_number}) للتعديل عليها؟`
       );
       if (!confirmReplace) return;
     }
 
-    // 1. Restock items and reverse previous transaction in DB
-    const voidRes = db.voidInvoice(saleToRecall.id, 'all');
-    if (!voidRes.success) {
-      setErrorMessage(`تعذر استرجاع الفاتورة: ${voidRes.message}`);
-      setTimeout(() => setErrorMessage(null), 3000);
-      return;
-    }
-
-    // 2. Load items into active POS cart
+    // Load items into active POS cart (Original invoice remains safely in DB until checkout!)
     const recalledCartItems: SaleItem[] = saleToRecall.items.map(it => ({
       ...it,
       id: `recalled_${Date.now()}_${Math.random().toString(36).substring(2, 5)}`
@@ -319,13 +319,27 @@ export const SalesScreen: React.FC<SalesScreenProps> = ({ onShowReceipt }) => {
     setDiscount(saleToRecall.discount || 0);
     setPaidAmount(saleToRecall.paid_amount || 0);
     setNotes(saleToRecall.notes || '');
+    setEditingSale(saleToRecall);
 
-    // 3. Switch to POS active tab & reload DB state
+    try {
+      localStorage.setItem('idenia_pos_active_editing_sale', JSON.stringify(saleToRecall));
+    } catch {}
+
+    // Switch to POS active tab
     setActiveTab('pos');
-    loadData();
 
-    setSuccessMessage(`🔄 تم استرجاع الفاتورة (#${saleToRecall.invoice_number}) بداخل الكاشير للتعديل بنجاح، وإعادة أصنافها للمخزن مؤقتاً. يمكنك الآن إضافة/خصم أصناف ثم حفظ الفاتورة مرة أخرى!`);
+    setSuccessMessage(`✏️ وضع التعديل: تم إحضار الفاتورة رقم (#${saleToRecall.invoice_number}) إلى الكاشير. الفاتورة الأصلية محفوظة تماماً بسجل الفواتير وسيتأكد التعديل فقط عند الضغط على "حفظ وطباعة الفاتورة"!`);
     setTimeout(() => setSuccessMessage(null), 6000);
+  };
+
+  const cancelEditingSale = () => {
+    setEditingSale(null);
+    try {
+      localStorage.removeItem('idenia_pos_active_editing_sale');
+    } catch {}
+    resetCart();
+    setSuccessMessage('تم إلغاء تعديل الفاتورة وتصفير الكاشير. الفاتورة الأصلية محفوظة بسجل الفواتير كما هي.');
+    setTimeout(() => setSuccessMessage(null), 3500);
   };
 
   // Listen for global recall invoice events from thermal receipt modal or other screens
@@ -337,7 +351,7 @@ export const SalesScreen: React.FC<SalesScreenProps> = ({ onShowReceipt }) => {
     };
     window.addEventListener('idenia_recall_invoice', handleGlobalRecall);
     return () => window.removeEventListener('idenia_recall_invoice', handleGlobalRecall);
-  }, [cart]);
+  }, [cart, editingSale]);
 
   // Auto-detect barcode entered directly into search box
   useEffect(() => {
@@ -394,6 +408,10 @@ export const SalesScreen: React.FC<SalesScreenProps> = ({ onShowReceipt }) => {
     setDiscount(0);
     setPaidAmount(0);
     setNotes('');
+    setEditingSale(null);
+    try {
+      localStorage.removeItem('idenia_pos_active_editing_sale');
+    } catch {}
   };
 
   const handleCheckout = () => {
@@ -415,6 +433,16 @@ export const SalesScreen: React.FC<SalesScreenProps> = ({ onShowReceipt }) => {
       return;
     }
 
+    // If we are editing an existing recalled invoice: void/replace the old invoice first right before saving the new modified invoice
+    if (editingSale) {
+      const voidOldRes = db.voidInvoice(editingSale.id, 'all');
+      if (!voidOldRes.success) {
+        setErrorMessage(`تعذر استبدال الفاتورة القديمة: ${voidOldRes.message}`);
+        setTimeout(() => setErrorMessage(null), 3500);
+        return;
+      }
+    }
+
     const res = db.processSale({
       customer_id: selectedCustomerId || undefined,
       customer_name: customerName,
@@ -431,7 +459,19 @@ export const SalesScreen: React.FC<SalesScreenProps> = ({ onShowReceipt }) => {
       return;
     }
 
-    setSuccessMessage(`تم إصدار الفاتورة رقم ${res.sale.invoice_number} وحفظها بنجاح!`);
+    const isEdit = Boolean(editingSale);
+    const invoiceNum = res.sale.invoice_number;
+
+    setEditingSale(null);
+    try {
+      localStorage.removeItem('idenia_pos_active_editing_sale');
+    } catch {}
+
+    setSuccessMessage(
+      isEdit
+        ? `✏️ تم تحديث وحفظ الفاتورة رقم #${invoiceNum} بنجاح!`
+        : `تم إصدار الفاتورة رقم #${invoiceNum} وحفظها بنجاح!`
+    );
     loadData();
     resetCart();
 
@@ -486,7 +526,31 @@ export const SalesScreen: React.FC<SalesScreenProps> = ({ onShowReceipt }) => {
         </div>
       </div>
 
-      {/* Alert Messages */}
+      {/* Alert Messages & Editing Banner */}
+      {editingSale && (
+        <div className="p-3.5 bg-amber-50 dark:bg-amber-950/60 border border-amber-300 dark:border-amber-800 rounded-2xl flex items-center justify-between gap-3 text-xs font-bold text-amber-900 dark:text-amber-200 shadow-xs">
+          <div className="flex items-center gap-2">
+            <RefreshCw className="w-4 h-4 text-amber-600 animate-spin shrink-0" />
+            <div>
+              <span className="text-sm font-black">
+                أنت تقوم الآن بتعديل الفاتورة رقم (#
+                {editingSale.invoice_number})
+              </span>
+              <p className="text-[11px] text-amber-700 dark:text-amber-400 font-medium mt-0.5">
+                الفاتورة الأصلية محفوظة تماماً بسجل الفواتير ولن تُحذف، وتعديلاتها تتأكد فقط عند الضغط على "حفظ وطباعة الفاتورة".
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={cancelEditingSale}
+            className="px-3 py-2 bg-amber-200 dark:bg-amber-900/80 hover:bg-amber-300 dark:hover:bg-amber-800 text-amber-900 dark:text-amber-100 rounded-xl text-xs font-black transition cursor-pointer shrink-0 shadow-2xs"
+          >
+            إلغاء التعديل
+          </button>
+        </div>
+      )}
+
       {errorMessage && (
         <div className="p-3.5 bg-red-50 dark:bg-red-950/60 border border-red-200 dark:border-red-900/60 rounded-2xl flex items-center gap-2 text-red-700 dark:text-red-300 text-xs font-bold">
           <AlertCircle className="w-4 h-4 shrink-0" />
