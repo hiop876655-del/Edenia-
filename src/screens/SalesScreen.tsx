@@ -79,8 +79,12 @@ export const SalesScreen: React.FC<SalesScreenProps> = ({ onShowReceipt }) => {
       if (e.key === 'idenia_last_scanned_barcode_event' && e.newValue) {
         try {
           const parsed = JSON.parse(e.newValue);
-          if (parsed && parsed.barcode && parsed.mode === 'sale') {
-            handleBarcodeDetected(parsed.barcode);
+          if (parsed && parsed.barcode) {
+            if (parsed.mode === 'sale') {
+              handleBarcodeDetected(parsed.barcode);
+            } else if (parsed.mode === 'return') {
+              handleBarcodeReturn(parsed.barcode);
+            }
           }
         } catch {}
       }
@@ -192,6 +196,47 @@ export const SalesScreen: React.FC<SalesScreenProps> = ({ onShowReceipt }) => {
       setTimeout(() => setSuccessMessage(null), 2500);
     } else {
       setErrorMessage(`لم يتم العثور على منتج مسجل بالباركود (${clean}) في المخزن.`);
+      setTimeout(() => setErrorMessage(null), 3500);
+    }
+  };
+
+  // Handler for Barcode Return / Restock from Phone Camera or Scanner
+  const handleBarcodeReturn = (scannedCode: string) => {
+    const clean = scannedCode.trim();
+    if (!clean) return;
+
+    const allProds = db.getProducts();
+    const found = allProds.find(p => p.barcode && p.barcode.trim().toLowerCase() === clean.toLowerCase());
+    if (found) {
+      // 1. Refresh products list
+      loadData();
+      playBeep();
+
+      // 2. If this item is currently in the active cart, decrease it by 1 or remove it
+      setCart(prev => {
+        const inCart = prev.find(it => it.product_id === found.id);
+        if (inCart) {
+          if (inCart.quantity <= 1) {
+            return prev.filter(it => it.product_id !== found.id);
+          }
+          return prev.map(it =>
+            it.product_id === found.id
+              ? {
+                  ...it,
+                  quantity: it.quantity - 1,
+                  total_price: (it.quantity - 1) * it.selling_price,
+                  profit: (it.quantity - 1) * (it.selling_price - it.purchase_price)
+                }
+              : it
+          );
+        }
+        return prev;
+      });
+
+      setSuccessMessage(`🔄 استرجاع: تم استرجاع صنف (${found.name}) وإعادته إلى رصيد المخزن بنجاح!`);
+      setTimeout(() => setSuccessMessage(null), 3500);
+    } else {
+      setErrorMessage(`وصل طلب استرجاع لصنف غير مسجل بالباركود: ${clean}`);
       setTimeout(() => setErrorMessage(null), 3500);
     }
   };
@@ -702,9 +747,8 @@ export const SalesScreen: React.FC<SalesScreenProps> = ({ onShowReceipt }) => {
               onBarcodeReceived={(barcode, mode) => {
                 if (mode === 'sale') {
                   handleBarcodeDetected(barcode);
-                } else {
-                  // Return mode
-                  handleBarcodeDetected(barcode);
+                } else if (mode === 'return') {
+                  handleBarcodeReturn(barcode);
                 }
               }}
             />
