@@ -116,17 +116,34 @@ export const ProductsScreen: React.FC<ProductsScreenProps> = ({
   };
 
   const generateRandomBarcode = () => {
-    // Generate distinct 4-5 digit short barcode
+    // Generate authentic 13-digit retail barcode (EAN-13) with standard GS1 checksum
     let code = '';
-    const existing = new Set(products.map(p => p.barcode));
+    const existing = new Set(products.map(p => p.barcode?.trim()));
     for (let attempts = 0; attempts < 100; attempts++) {
-      const candidate = String(Math.floor(10000 + Math.random() * 90000));
+      // 200 prefix (Standard GS1 retail in-store prefix) + 9 random digits = 12 digits
+      let first12 = '200';
+      for (let i = 0; i < 9; i++) {
+        first12 += Math.floor(Math.random() * 10).toString();
+      }
+
+      // Calculate standard GS1 EAN-13 check digit (Modulo 10)
+      let sum = 0;
+      for (let i = 0; i < 12; i++) {
+        const digit = parseInt(first12[i], 10);
+        sum += i % 2 === 0 ? digit : digit * 3;
+      }
+      const remainder = sum % 10;
+      const checkDigit = remainder === 0 ? 0 : 10 - remainder;
+      const candidate = first12 + checkDigit.toString();
+
       if (!existing.has(candidate)) {
         code = candidate;
         break;
       }
     }
-    if (!code) code = String(Math.floor(1000 + Math.random() * 9000));
+    if (!code) {
+      code = `200${Date.now().toString().slice(-9)}0`;
+    }
     setBarcode(code);
   };
 
@@ -330,9 +347,9 @@ export const ProductsScreen: React.FC<ProductsScreenProps> = ({
                     type="button"
                     onClick={generateRandomBarcode}
                     className="text-[11px] font-bold text-[#2E7D32] dark:text-[#66BB6A] hover:underline cursor-pointer"
-                    title="توليد كود من 5 أرقام عشوائي"
+                    title="توليد كود باركود تجاري قياسي من 13 رقم (EAN-13)"
                   >
-                    توليد تلقائي
+                    توليد كود تجاري (13 رقم)
                   </button>
                 </div>
               </div>

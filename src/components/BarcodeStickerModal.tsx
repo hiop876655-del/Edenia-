@@ -9,49 +9,137 @@ interface BarcodeStickerModalProps {
   onClose: () => void;
 }
 
-// Simple and reliable Code-128 / Barcode SVG generator
-function generateBarcodeSvg(code: string): string {
-  const clean = (code || '00000').trim();
-  // Standard Code 128 / 2 of 5 visual representation with exact widths
-  let bars: { width: number; isBlack: boolean }[] = [];
-  
-  // Start pattern
-  bars.push({ width: 2, isBlack: true });
-  bars.push({ width: 1, isBlack: false });
-  bars.push({ width: 2, isBlack: true });
-  bars.push({ width: 1, isBlack: false });
+// Standard Code 128 Patterns (107 patterns, index 0 to 106)
+const CODE128_PATTERNS = [
+  "212222", "222122", "222221", "121223", "121322", "131222", "122213", "122312", "132212", "221213",
+  "221312", "231212", "112232", "122132", "122231", "113222", "123122", "123221", "223211", "221132",
+  "221231", "213212", "223112", "312131", "311222", "321122", "321221", "312212", "322112", "322211",
+  "212123", "212321", "232121", "111323", "131123", "131321", "112313", "132113", "132311", "211313",
+  "231113", "231311", "112133", "112331", "132131", "113123", "113321", "133121", "313121", "211331",
+  "231131", "213113", "213311", "213131", "311123", "311321", "331121", "312113", "312311", "332111",
+  "314111", "221411", "431111", "111224", "111422", "121124", "121421", "141122", "141221", "112214",
+  "112412", "122114", "122411", "142112", "142211", "241211", "221114", "413111", "241112", "134111",
+  "111242", "121142", "121241", "114212", "124112", "124211", "411212", "421112", "421211", "212141",
+  "214121", "412121", "111143", "111341", "131141", "114113", "114311", "411113", "411311", "113141",
+  "114131", "311141", "411131", "211412", "211214", "211232", "2331112"
+];
 
-  // Generate bars from characters
+// Standard EAN-13 Coding Tables
+const EAN_L = ['0001101', '0011001', '0010011', '0111101', '0100011', '0110001', '0101111', '0111011', '0110111', '0001011'];
+const EAN_G = ['0100111', '0110011', '0011011', '0100001', '0011101', '0111001', '0000101', '0010001', '0001001', '0010111'];
+const EAN_R = ['1110010', '1100110', '1101100', '1000010', '1011100', '1001110', '1010000', '1000100', '1001000', '1110100'];
+const EAN_PARITY = ['LLLLLL', 'LLGLGG', 'LLGGLG', 'LLGGGL', 'LGLLGG', 'LGGLLG', 'LGGGLL', 'LGLGLG', 'LGLGGL', 'LGGLGL'];
+
+// Authentic scanner-readable Barcode SVG generator (EAN-13 & Code 128)
+function generateBarcodeSvg(code: string): string {
+  const clean = (code || '2000000000000').trim();
+
+  // 1. If 13 digits: generate standard commercial EAN-13
+  if (/^\d{13}$/.test(clean)) {
+    const digits = clean.split('').map(Number);
+    const firstDigit = digits[0];
+    const parity = EAN_PARITY[firstDigit] || 'LLLLLL';
+
+    let bits = '';
+    // Quiet zone left (7 modules)
+    bits += '0000000';
+    // Left Guard
+    bits += '101';
+
+    // 6 Left Digits
+    for (let i = 1; i <= 6; i++) {
+      const d = digits[i];
+      const useG = parity[i - 1] === 'G';
+      bits += useG ? EAN_G[d] : EAN_L[d];
+    }
+
+    // Center Guard
+    bits += '01010';
+
+    // 6 Right Digits
+    for (let i = 7; i <= 12; i++) {
+      const d = digits[i];
+      bits += EAN_R[d];
+    }
+
+    // Right Guard
+    bits += '101';
+    // Quiet zone right (7 modules)
+    bits += '0000000';
+
+    const moduleWidth = 2;
+    const height = 52;
+    const totalWidth = bits.length * moduleWidth;
+
+    let rects = '';
+    for (let i = 0; i < bits.length; i++) {
+      if (bits[i] === '1') {
+        const x = i * moduleWidth;
+        rects += `<rect x="${x}" y="0" width="${moduleWidth}" height="${height}" fill="#000000" />`;
+      }
+    }
+
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${totalWidth} ${height}" class="w-full h-14" preserveAspectRatio="none">
+      ${rects}
+    </svg>`;
+  }
+
+  // 2. Otherwise: generate standard Code 128 (Code B) for any alphanumeric text
+  const startCode = 104; // Start B
+  const codes: number[] = [startCode];
+
   for (let i = 0; i < clean.length; i++) {
-    const charCode = clean.charCodeAt(i);
-    const pattern = (charCode * 7 + 13) % 64;
-    for (let bit = 5; bit >= 0; bit--) {
-      const isBlack = ((pattern >> bit) & 1) === 1;
-      bars.push({ width: isBlack ? 2 : 1, isBlack });
-      bars.push({ width: 1, isBlack: false });
+    const ascii = clean.charCodeAt(i);
+    if (ascii >= 32 && ascii <= 126) {
+      codes.push(ascii - 32);
+    } else {
+      codes.push(0);
     }
   }
 
-  // Stop pattern
-  bars.push({ width: 3, isBlack: true });
-  bars.push({ width: 1, isBlack: false });
-  bars.push({ width: 2, isBlack: true });
+  // Calculate Checksum Modulo 103
+  let checksum = startCode;
+  for (let i = 1; i < codes.length; i++) {
+    checksum += codes[i] * i;
+  }
+  codes.push(checksum % 103);
+  codes.push(106); // Stop Code
 
-  let x = 10;
-  const height = 55;
-  const elements = bars.map((bar, idx) => {
-    const rect = bar.isBlack
-      ? `<rect x="${x}" y="0" width="${bar.width}" height="${height}" fill="#000000" />`
-      : '';
-    x += bar.width;
-    return rect;
-  });
+  // Build binary pattern
+  let bits = '0000000000'; // Quiet zone
+  for (const c of codes) {
+    const pattern = CODE128_PATTERNS[c] || '212222';
+    for (let i = 0; i < pattern.length; i++) {
+      const width = parseInt(pattern[i], 10);
+      const isBar = i % 2 === 0;
+      bits += (isBar ? '1' : '0').repeat(width);
+    }
+  }
+  bits += '0000000000'; // Quiet zone
 
-  const totalWidth = x + 10;
+  const moduleWidth = 1.8;
+  const height = 52;
+  const totalWidth = bits.length * moduleWidth;
 
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${totalWidth} ${height}" class="w-full h-14">
-    ${elements.join('')}
+  let rects = '';
+  for (let i = 0; i < bits.length; i++) {
+    if (bits[i] === '1') {
+      const x = i * moduleWidth;
+      rects += `<rect x="${x}" y="0" width="${moduleWidth}" height="${height}" fill="#000000" />`;
+    }
+  }
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${totalWidth} ${height}" class="w-full h-14" preserveAspectRatio="none">
+    ${rects}
   </svg>`;
+}
+
+function formatBarcodeText(code: string): string {
+  const clean = (code || '').trim();
+  if (/^\d{13}$/.test(clean)) {
+    return `${clean.slice(0, 1)}  ${clean.slice(1, 7)}  ${clean.slice(7, 13)}`;
+  }
+  return clean ? `#${clean}` : '#00000';
 }
 
 export const BarcodeStickerModal: React.FC<BarcodeStickerModalProps> = ({
@@ -136,8 +224,8 @@ export const BarcodeStickerModal: React.FC<BarcodeStickerModalProps> = ({
         <body>
           <div class="shop-name">${settings.shop_name || 'ايدينيا - حِسبة'}</div>
           <div class="product-name">${product.name}</div>
-          <div class="barcode-svg">${generateBarcodeSvg(product.barcode || '00000')}</div>
-          <div class="barcode-text">#${product.barcode || '00000'}</div>
+          <div class="barcode-svg">${generateBarcodeSvg(product.barcode || '')}</div>
+          <div class="barcode-text">${formatBarcodeText(product.barcode || '')}</div>
           <div class="price">${product.selling_price.toFixed(2)} ${settings.currency_symbol}</div>
           <script>
             window.onload = function() {
@@ -192,12 +280,12 @@ export const BarcodeStickerModal: React.FC<BarcodeStickerModalProps> = ({
             {/* Generated SVG Barcode */}
             <div
               className="w-full flex justify-center py-1"
-              dangerouslySetInnerHTML={{ __html: generateBarcodeSvg(product.barcode || '00000') }}
+              dangerouslySetInnerHTML={{ __html: generateBarcodeSvg(product.barcode || '') }}
             />
 
             {/* Numeric Digits */}
             <div className="font-mono text-xs font-black tracking-widest text-black">
-              #{product.barcode || '00000'}
+              {formatBarcodeText(product.barcode || '')}
             </div>
 
             {/* Price */}
