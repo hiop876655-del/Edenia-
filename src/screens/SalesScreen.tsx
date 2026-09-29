@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { db } from '../services/db';
 import { Product, Customer, Sale, SaleItem, AppSettings } from '../types';
+import { SmartVoidModal } from '../components/SmartVoidModal';
 
 interface SalesScreenProps {
   onShowReceipt: (sale: Sale) => void;
@@ -30,6 +31,7 @@ export const SalesScreen: React.FC<SalesScreenProps> = ({ onShowReceipt }) => {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [settings, setSettings] = useState<AppSettings>(db.getSettings());
   const [salesHistory, setSalesHistory] = useState<Sale[]>([]);
+  const [saleToVoid, setSaleToVoid] = useState<Sale | null>(null);
 
   // Active Cart State
   const [cart, setCart] = useState<SaleItem[]>([]);
@@ -95,6 +97,9 @@ export const SalesScreen: React.FC<SalesScreenProps> = ({ onShowReceipt }) => {
   const subtotal = cart.reduce((sum, it) => sum + it.total_price, 0);
   const total = Math.max(0, subtotal - (Number(discount) || 0));
   const remaining = Math.max(0, total - (Number(paidAmount) || 0));
+
+  const selectedCustomer = customers.find(c => c.id === selectedCustomerId);
+  const currentCustDebt = selectedCustomer ? (selectedCustomer.remaining_debt || 0) : 0;
 
   // Payment type switch handlers:
   // When cash: auto-set paid amount to total invoice
@@ -505,10 +510,17 @@ export const SalesScreen: React.FC<SalesScreenProps> = ({ onShowReceipt }) => {
 
               {/* Customer Selection */}
               <div className="space-y-2 pt-2 border-t border-gray-100 dark:border-gray-800">
-                <label className="text-xs font-bold text-gray-700 dark:text-gray-300 flex items-center gap-1.5">
-                  <User className="w-3.5 h-3.5 text-[#2E7D32]" />
-                  <span>تحديد العميل</span>
-                </label>
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-gray-700 dark:text-gray-300 flex items-center gap-1.5">
+                    <User className="w-3.5 h-3.5 text-[#2E7D32]" />
+                    <span>تحديد العميل</span>
+                  </label>
+                  {selectedCustomerId && currentCustDebt > 0 && (
+                    <span className="text-[11px] font-black text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/60 px-2 py-0.5 rounded-md border border-amber-200 dark:border-amber-800/60">
+                      حسابه السابق: {currentCustDebt.toFixed(2)} {settings.currency_symbol}
+                    </span>
+                  )}
+                </div>
 
                 <div className="grid grid-cols-2 gap-2">
                   <select
@@ -715,19 +727,7 @@ export const SalesScreen: React.FC<SalesScreenProps> = ({ onShowReceipt }) => {
 
                         <button
                           type="button"
-                          onClick={() => {
-                            if (window.confirm(`هل أنت متأكد من إلغاء الفاتورة رقم (${sale.invoice_number})؟\nسيتم إرجاع جميع الأصناف المباعة إلى رصيد المخزن فوراً وإلغاء أي حساب أو دين مرتبط بها.`)) {
-                              const res = db.voidInvoice(sale.id);
-                              if (res.success) {
-                                setSuccessMessage(res.message);
-                                loadData();
-                                setTimeout(() => setSuccessMessage(null), 3500);
-                              } else {
-                                setErrorMessage(res.message);
-                                setTimeout(() => setErrorMessage(null), 3000);
-                              }
-                            }
-                          }}
+                          onClick={() => setSaleToVoid(sale)}
                           className="p-1.5 text-red-500 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/40 rounded-lg cursor-pointer transition-colors"
                           title="إلغاء الفاتورة واسترجاع الأصناف للمخزن"
                         >
@@ -742,6 +742,25 @@ export const SalesScreen: React.FC<SalesScreenProps> = ({ onShowReceipt }) => {
           </div>
         </div>
       )}
+
+      {/* Smart Void Invoice Modal */}
+      <SmartVoidModal
+        sale={saleToVoid}
+        settings={settings}
+        isOpen={!!saleToVoid}
+        onClose={() => setSaleToVoid(null)}
+        onConfirmVoid={(saleId, mode) => {
+          const res = db.voidInvoice(saleId, mode);
+          if (res.success) {
+            setSuccessMessage(res.message);
+            loadData();
+            setTimeout(() => setSuccessMessage(null), 3500);
+          } else {
+            setErrorMessage(res.message);
+            setTimeout(() => setErrorMessage(null), 3000);
+          }
+        }}
+      />
     </div>
   );
 };

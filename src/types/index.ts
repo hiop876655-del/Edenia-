@@ -67,6 +67,10 @@ export interface Sale {
   items_count: number;
   items: SaleItem[];
   notes?: string;
+  previous_balance?: number;
+  paid_towards_previous_debt?: number;
+  final_balance?: number;
+  void_status?: 'active' | 'voided' | 'items_voided' | 'payment_voided';
   created_at: string;
 }
 

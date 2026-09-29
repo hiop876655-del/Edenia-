@@ -33,6 +33,9 @@ export const DebtsScreen: React.FC = () => {
 
   useEffect(() => {
     loadData();
+    const handleDbChanged = () => loadData();
+    window.addEventListener('idenia_db_changed', handleDbChanged);
+    return () => window.removeEventListener('idenia_db_changed', handleDbChanged);
   }, []);
 
   const handlePaySubmit = (e: React.FormEvent) => {

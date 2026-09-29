@@ -1,13 +1,14 @@
-import React, { useRef } from 'react';
+import React, { useRef, useState } from 'react';
 import { Printer, X, Check, Share2, Copy, RotateCcw } from 'lucide-react';
 import { Sale, AppSettings } from '../types';
+import { SmartVoidModal } from './SmartVoidModal';
 
 interface ThermalReceiptModalProps {
   sale: Sale | null;
   settings: AppSettings;
   isOpen: boolean;
   onClose: () => void;
-  onVoid?: (saleId: string) => void;
+  onVoid?: (saleId: string, mode?: 'all' | 'items_only' | 'payment_only') => void;
 }
 
 export const ThermalReceiptModal: React.FC<ThermalReceiptModalProps> = ({
@@ -18,13 +19,20 @@ export const ThermalReceiptModal: React.FC<ThermalReceiptModalProps> = ({
   onVoid
 }) => {
   const receiptRef = useRef<HTMLDivElement>(null);
-  const [copied, setCopied] = React.useState(false);
+  const [copied, setCopied] = useState(false);
+  const [isVoidModalOpen, setIsVoidModalOpen] = useState(false);
 
   if (!isOpen || !sale) return null;
 
   const handlePrint = () => {
     window.print();
   };
+
+  const prevBalance = sale.previous_balance || 0;
+  const paidTowardsOldDebt = sale.paid_towards_previous_debt || Math.max(0, sale.paid_amount - sale.total);
+  const finalBalance = typeof sale.final_balance === 'number'
+    ? sale.final_balance
+    : Math.max(0, prevBalance + sale.remaining_amount - paidTowardsOldDebt);
 
   const handleCopyText = () => {
     let text = `================================\n`;
@@ -40,12 +48,16 @@ export const ThermalReceiptModal: React.FC<ThermalReceiptModalProps> = ({
       text += `${it.product_name} x ${it.quantity} = ${(it.total_price).toFixed(2)} ${settings.currency_symbol}\n`;
     });
     text += `--------------------------------\n`;
-    text += `الإجمالي: ${sale.subtotal.toFixed(2)} ${settings.currency_symbol}\n`;
-    if (sale.discount > 0) text += `الخصم: ${sale.discount.toFixed(2)} ${settings.currency_symbol}\n`;
-    text += `الصافي: ${sale.total.toFixed(2)} ${settings.currency_symbol}\n`;
-    text += `المدفوع: ${sale.paid_amount.toFixed(2)} ${settings.currency_symbol}\n`;
-    if (sale.remaining_amount > 0) {
-      text += `المتبقي (دين): ${sale.remaining_amount.toFixed(2)} ${settings.currency_symbol}\n`;
+    text += `قيمة المشتريات: ${sale.total.toFixed(2)} ${settings.currency_symbol}\n`;
+    if (prevBalance > 0) {
+      text += `الحساب السابق: ${prevBalance.toFixed(2)} ${settings.currency_symbol}\n`;
+    }
+    text += `المدفوع الآن: ${sale.paid_amount.toFixed(2)} ${settings.currency_symbol}\n`;
+    if (paidTowardsOldDebt > 0) {
+      text += `(منها سداد من الدين: ${paidTowardsOldDebt.toFixed(2)} ${settings.currency_symbol})\n`;
+    }
+    if (finalBalance > 0) {
+      text += `المتبقي بذمة العميل: ${finalBalance.toFixed(2)} ${settings.currency_symbol}\n`;
     }
     text += `================================\n`;
     text += `${settings.invoice_footer}\n`;
@@ -56,181 +68,213 @@ export const ThermalReceiptModal: React.FC<ThermalReceiptModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 overflow-y-auto">
-      <div className="bg-white dark:bg-[#1E1E1E] rounded-2xl shadow-2xl max-w-md w-full overflow-hidden border border-gray-200 dark:border-gray-800">
-        {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-zinc-900">
-          <div className="flex items-center gap-2">
-            <Printer className="w-5 h-5 text-[#2E7D32] dark:text-[#66BB6A]" />
-            <h3 className="font-bold text-base text-gray-900 dark:text-white">
-              إيصال الفاتورة الحرارية
-            </h3>
-          </div>
-          <button
-            onClick={onClose}
-            className="p-1.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 cursor-pointer"
-          >
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-
-        {/* Printable Thermal Receipt Box */}
-        <div className="p-6 overflow-y-auto max-h-[70vh] flex justify-center bg-gray-100 dark:bg-black/30">
-          <div
-            ref={receiptRef}
-            className="w-[300px] bg-white text-black p-4 font-mono text-xs shadow-md border border-gray-300 rounded-sm leading-relaxed select-text"
-            dir="rtl"
-          >
-            {/* Store Branding */}
-            <div className="text-center pb-3 border-b border-dashed border-gray-400 space-y-1">
-              <h2 className="text-base font-extrabold tracking-wide text-black">
-                {settings.shop_name}
-              </h2>
-              <p className="text-[11px] text-gray-700">{settings.invoice_header}</p>
-              <p className="text-[10px] text-gray-600">
-                هاتف: {settings.phone} | {settings.address}
-              </p>
+    <>
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 overflow-y-auto">
+        <div className="bg-white dark:bg-[#1E1E1E] rounded-2xl shadow-2xl max-w-md w-full overflow-hidden border border-gray-200 dark:border-gray-800">
+          {/* Header */}
+          <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-zinc-900">
+            <div className="flex items-center gap-2">
+              <Printer className="w-5 h-5 text-[#2E7D32] dark:text-[#66BB6A]" />
+              <h3 className="font-bold text-base text-gray-900 dark:text-white">
+                إيصال الفاتورة الحرارية
+              </h3>
             </div>
-
-            {/* Invoice Meta */}
-            <div className="py-2.5 border-b border-dashed border-gray-400 space-y-1 text-[11px]">
-              <div className="flex justify-between">
-                <span className="font-bold">رقم الفاتورة:</span>
-                <span>{sale.invoice_number}</span>
-              </div>
-              <div className="flex justify-between">
-                <span>التاريخ:</span>
-                <span>{new Date(sale.created_at).toLocaleDateString('ar-EG')}</span>
-              </div>
-              <div className="flex justify-between">
-                <span>الوقت:</span>
-                <span>{new Date(sale.created_at).toLocaleTimeString('ar-EG')}</span>
-              </div>
-              <div className="flex justify-between">
-                <span>العميل:</span>
-                <span className="font-bold">{sale.customer_name}</span>
-              </div>
-              <div className="flex justify-between">
-                <span>طريقة الدفع:</span>
-                <span className="font-bold">
-                  {sale.payment_type === 'cash' ? 'نقدي كاش' : 'آجل (حساب)'}
-                </span>
-              </div>
-            </div>
-
-            {/* Items Table */}
-            <div className="py-2 border-b border-dashed border-gray-400">
-              <div className="grid grid-cols-12 font-bold text-[11px] pb-1 border-b border-gray-300">
-                <span className="col-span-6 text-right">الصنف</span>
-                <span className="col-span-2 text-center">الكمية</span>
-                <span className="col-span-2 text-center">السعر</span>
-                <span className="col-span-2 text-left">الإجمالي</span>
-              </div>
-              <div className="divide-y divide-gray-100 py-1 space-y-1">
-                {sale.items.map((it, idx) => (
-                  <div key={idx} className="grid grid-cols-12 text-[11px] pt-1">
-                    <span className="col-span-6 font-medium text-right truncate">
-                      {it.product_name}
-                    </span>
-                    <span className="col-span-2 text-center">
-                      {it.quantity} {it.unit}
-                    </span>
-                    <span className="col-span-2 text-center">
-                      {it.selling_price.toFixed(1)}
-                    </span>
-                    <span className="col-span-2 text-left font-bold">
-                      {it.total_price.toFixed(1)}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Totals */}
-            <div className="py-2.5 space-y-1.5 text-[11px] border-b border-dashed border-gray-400">
-              <div className="flex justify-between">
-                <span>المجموع الفرعي:</span>
-                <span>{sale.subtotal.toFixed(2)} {settings.currency_symbol}</span>
-              </div>
-              {sale.discount > 0 && (
-                <div className="flex justify-between text-red-600">
-                  <span>الخصم:</span>
-                  <span>- {sale.discount.toFixed(2)} {settings.currency_symbol}</span>
-                </div>
-              )}
-              <div className="flex justify-between font-extrabold text-sm pt-1 border-t border-gray-300">
-                <span>الصافي المطلوب:</span>
-                <span>{sale.total.toFixed(2)} {settings.currency_symbol}</span>
-              </div>
-              <div className="flex justify-between text-emerald-800">
-                <span>المسدد:</span>
-                <span>{sale.paid_amount.toFixed(2)} {settings.currency_symbol}</span>
-              </div>
-              {sale.remaining_amount > 0 && (
-                <div className="flex justify-between font-bold text-red-700 bg-red-50 p-1 rounded">
-                  <span>المتبقي في الذمة:</span>
-                  <span>{sale.remaining_amount.toFixed(2)} {settings.currency_symbol}</span>
-                </div>
-              )}
-            </div>
-
-            {/* Barcode & Footer */}
-            <div className="pt-3 text-center space-y-2">
-              <div className="font-mono text-xs tracking-widest bg-gray-50 py-1 border border-gray-300">
-                *{sale.invoice_number}*
-              </div>
-              <p className="text-[10px] text-gray-600">{settings.invoice_footer}</p>
-              <p className="text-[9px] text-gray-400">نظام ايدينيا - حِسبة لإدارة الحسابات والمخازن</p>
-            </div>
-          </div>
-        </div>
-
-        {/* Action Controls */}
-        <div className="flex flex-wrap items-center justify-between gap-2 p-4 bg-gray-50 dark:bg-zinc-900 border-t border-gray-100 dark:border-gray-800">
-          <div className="flex items-center gap-2">
-            <button
-              onClick={handleCopyText}
-              className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-gray-700 dark:text-gray-200 bg-white dark:bg-zinc-800 border border-gray-200 dark:border-gray-700 rounded-xl hover:bg-gray-100 dark:hover:bg-zinc-700 transition-colors cursor-pointer"
-            >
-              {copied ? <Check className="w-4 h-4 text-emerald-600" /> : <Copy className="w-4 h-4" />}
-              <span>{copied ? 'تم النسخ' : 'نسخ النص'}</span>
-            </button>
-
-            {onVoid && (
-              <button
-                type="button"
-                onClick={() => {
-                  if (window.confirm(`هل أنت متأكد من إلغاء الفاتورة رقم (${sale.invoice_number})؟\nسيتم إرجاع جميع الأصناف المباعة إلى رصيد المخزن فوراً، وإلغاء أي دين مرتبط بها.`)) {
-                    onVoid(sale.id);
-                    onClose();
-                  }
-                }}
-                className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900/60 hover:bg-red-100 dark:hover:bg-red-900/60 rounded-xl transition-colors cursor-pointer"
-                title="إلغاء الفاتورة واسترجاع البضاعة"
-              >
-                <RotateCcw className="w-4 h-4" />
-                <span>إلغاء العملية</span>
-              </button>
-            )}
-          </div>
-
-          <div className="flex items-center gap-2">
             <button
               onClick={onClose}
-              className="px-4 py-2 text-xs font-semibold text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-zinc-800 rounded-xl transition-colors cursor-pointer"
+              className="p-1.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 cursor-pointer"
             >
-              إغلاق
+              <X className="w-5 h-5" />
             </button>
-            <button
-              onClick={handlePrint}
-              className="flex items-center gap-2 px-5 py-2 text-xs font-bold text-white bg-[#2E7D32] hover:bg-[#256628] rounded-xl shadow-xs transition-colors cursor-pointer"
+          </div>
+
+          {/* Printable Thermal Receipt Box */}
+          <div className="p-6 overflow-y-auto max-h-[70vh] flex justify-center bg-gray-100 dark:bg-black/30">
+            <div
+              ref={receiptRef}
+              className="w-[300px] bg-white text-black p-4 font-mono text-xs shadow-md border border-gray-300 rounded-sm leading-relaxed select-text"
+              dir="rtl"
             >
-              <Printer className="w-4 h-4" />
-              <span>طباعة الإيصال</span>
-            </button>
+              {/* Store Branding */}
+              <div className="text-center pb-3 border-b border-dashed border-gray-400 space-y-1">
+                <h2 className="text-base font-extrabold tracking-wide text-black">
+                  {settings.shop_name}
+                </h2>
+                <p className="text-[11px] text-gray-700">{settings.invoice_header}</p>
+                <p className="text-[10px] text-gray-600">
+                  هاتف: {settings.phone} | {settings.address}
+                </p>
+              </div>
+
+              {/* Invoice Meta */}
+              <div className="py-2.5 border-b border-dashed border-gray-400 space-y-1 text-[11px]">
+                <div className="flex justify-between">
+                  <span className="font-bold">رقم الفاتورة:</span>
+                  <span>{sale.invoice_number}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>التاريخ:</span>
+                  <span>{new Date(sale.created_at).toLocaleDateString('ar-EG')}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>الوقت:</span>
+                  <span>{new Date(sale.created_at).toLocaleTimeString('ar-EG')}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>العميل:</span>
+                  <span className="font-bold">{sale.customer_name}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>طريقة الدفع:</span>
+                  <span className="font-bold">
+                    {sale.payment_type === 'cash' ? 'نقدي كاش' : 'آجل (حساب)'}
+                  </span>
+                </div>
+              </div>
+
+              {/* Items Table */}
+              <div className="py-2 border-b border-dashed border-gray-400">
+                <div className="grid grid-cols-12 font-bold text-[11px] pb-1 border-b border-gray-300">
+                  <span className="col-span-6 text-right">الصنف</span>
+                  <span className="col-span-2 text-center">الكمية</span>
+                  <span className="col-span-2 text-center">السعر</span>
+                  <span className="col-span-2 text-left">الإجمالي</span>
+                </div>
+                <div className="divide-y divide-gray-100 py-1 space-y-1">
+                  {sale.items.map((it, idx) => (
+                    <div key={idx} className="grid grid-cols-12 text-[11px] pt-1">
+                      <span className="col-span-6 font-medium text-right truncate">
+                        {it.product_name}
+                      </span>
+                      <span className="col-span-2 text-center">
+                        {it.quantity} {it.unit}
+                      </span>
+                      <span className="col-span-2 text-center">
+                        {it.selling_price.toFixed(1)}
+                      </span>
+                      <span className="col-span-2 text-left font-bold">
+                        {it.total_price.toFixed(1)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Totals & Smart Financial Balance */}
+              <div className="py-2.5 space-y-1.5 text-[11px] border-b border-dashed border-gray-400">
+                <div className="flex justify-between">
+                  <span>المجموع الفرعي:</span>
+                  <span>{sale.subtotal.toFixed(2)} {settings.currency_symbol}</span>
+                </div>
+                {sale.discount > 0 && (
+                  <div className="flex justify-between text-red-600">
+                    <span>الخصم:</span>
+                    <span>- {sale.discount.toFixed(2)} {settings.currency_symbol}</span>
+                  </div>
+                )}
+                <div className="flex justify-between font-extrabold text-xs pt-1 border-t border-gray-300">
+                  <span>صافي الفاتورة:</span>
+                  <span>{sale.total.toFixed(2)} {settings.currency_symbol}</span>
+                </div>
+
+                {prevBalance > 0 && (
+                  <div className="flex justify-between text-amber-800 bg-amber-50/70 p-1 rounded font-bold">
+                    <span>حساب العميل السابق:</span>
+                    <span>{prevBalance.toFixed(2)} {settings.currency_symbol}</span>
+                  </div>
+                )}
+
+                <div className="flex justify-between text-emerald-800 font-bold">
+                  <span>المدفوع نقداً الآن:</span>
+                  <span>{sale.paid_amount.toFixed(2)} {settings.currency_symbol}</span>
+                </div>
+
+                {paidTowardsOldDebt > 0 && (
+                  <div className="flex justify-between text-emerald-700 text-[10px] bg-emerald-50 p-1 rounded font-bold">
+                    <span>(سداد من الحساب القديم):</span>
+                    <span>{paidTowardsOldDebt.toFixed(2)} {settings.currency_symbol}</span>
+                  </div>
+                )}
+
+                {finalBalance > 0 ? (
+                  <div className="flex justify-between font-extrabold text-red-700 bg-red-50 p-1.5 rounded border border-red-200">
+                    <span>المتبقي النهائي في الذمة:</span>
+                    <span>{finalBalance.toFixed(2)} {settings.currency_symbol}</span>
+                  </div>
+                ) : (
+                  <div className="text-center font-bold text-emerald-700 bg-emerald-50 p-1 rounded">
+                    ✓ الحساب خالص بالكامل
+                  </div>
+                )}
+              </div>
+
+              {/* Barcode & Footer */}
+              <div className="pt-3 text-center space-y-2">
+                <div className="font-mono text-xs tracking-widest bg-gray-50 py-1 border border-gray-300">
+                  *{sale.invoice_number}*
+                </div>
+                <p className="text-[10px] text-gray-600">{settings.invoice_footer}</p>
+                <p className="text-[9px] text-gray-400">نظام ايدينيا - حِسبة لإدارة الحسابات والمخازن</p>
+              </div>
+            </div>
+          </div>
+
+          {/* Action Controls */}
+          <div className="flex flex-wrap items-center justify-between gap-2 p-4 bg-gray-50 dark:bg-zinc-900 border-t border-gray-100 dark:border-gray-800">
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleCopyText}
+                className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-gray-700 dark:text-gray-200 bg-white dark:bg-zinc-800 border border-gray-200 dark:border-gray-700 rounded-xl hover:bg-gray-100 dark:hover:bg-zinc-700 transition-colors cursor-pointer"
+              >
+                {copied ? <Check className="w-4 h-4 text-emerald-600" /> : <Copy className="w-4 h-4" />}
+                <span>{copied ? 'تم النسخ' : 'نسخ النص'}</span>
+              </button>
+
+              {onVoid && (
+                <button
+                  type="button"
+                  onClick={() => setIsVoidModalOpen(true)}
+                  className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900/60 hover:bg-red-100 dark:hover:bg-red-900/60 rounded-xl transition-colors cursor-pointer"
+                  title="إلغاء الفاتورة واسترجاع البضاعة"
+                >
+                  <RotateCcw className="w-4 h-4" />
+                  <span>إلغاء العملية</span>
+                </button>
+              )}
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                onClick={onClose}
+                className="px-4 py-2 text-xs font-semibold text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-zinc-800 rounded-xl transition-colors cursor-pointer"
+              >
+                إغلاق
+              </button>
+              <button
+                onClick={handlePrint}
+                className="flex items-center gap-2 px-5 py-2 text-xs font-bold text-white bg-[#2E7D32] hover:bg-[#256628] rounded-xl shadow-xs transition-colors cursor-pointer"
+              >
+                <Printer className="w-4 h-4" />
+                <span>طباعة الإيصال</span>
+              </button>
+            </div>
           </div>
         </div>
       </div>
-    </div>
+
+      {/* Smart Void Invoice Modal */}
+      <SmartVoidModal
+        sale={sale}
+        settings={settings}
+        isOpen={isVoidModalOpen}
+        onClose={() => setIsVoidModalOpen(false)}
+        onConfirmVoid={(saleId, mode) => {
+          if (onVoid) {
+            onVoid(saleId, mode);
+          }
+          onClose();
+        }}
+      />
+    </>
   );
 };
+

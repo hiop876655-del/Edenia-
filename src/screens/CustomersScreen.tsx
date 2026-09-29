@@ -68,6 +68,9 @@ export const CustomersScreen: React.FC<CustomersScreenProps> = () => {
 
   useEffect(() => {
     loadData();
+    const handleDbChanged = () => loadData();
+    window.addEventListener('idenia_db_changed', handleDbChanged);
+    return () => window.removeEventListener('idenia_db_changed', handleDbChanged);
   }, []);
 
   const openCustomerStatement = (customer: Customer) => {

@@ -350,20 +350,14 @@ class LocalDatabase {
       }
     }
 
-    if (isCredit) {
-      if (!finalCustomerId) {
-        const newCust = this.saveCustomer({
-          name: trimmedCustomerName || 'عميل آجل',
-          notes: 'تم إنشاؤه تلقائياً من فاتورة بيع آجل'
-        });
-        finalCustomerId = newCust.id;
-      }
+    const previousBalance = finalCustomerId ? (this.getCustomerById(finalCustomerId)?.remaining_debt || 0) : 0;
+    let paidTowardsPreviousDebt = 0;
 
-      const debtCustName = trimmedCustomerName || 'عميل آجل';
+    if (finalCustomerId) {
+      const debtCustName = trimmedCustomerName || 'عميل مسجل';
 
       if (remainingAmount > 0) {
-        // Customer paid less than total -> add remaining debt
-        // Example: total 110, paid 50 -> remaining 60 goes to debt
+        // Customer paid less than total -> add remaining debt (e.g. total 110, paid 50 -> remaining 60 goes to debt)
         this.addDebt({
           customer_id: finalCustomerId,
           customer_name: debtCustName,
@@ -373,17 +367,20 @@ class LocalDatabase {
           notes: `متبقي من فاتورة ${invoiceNumber}`
         });
       } else if (paidAmount > total) {
-        // Customer paid more than invoice total (e.g. invoice total 110, paid 210)
-        // 110 settles current invoice in full, excess 100 pays down previous customer debt!
-        const excessPaid = paidAmount - total;
+        // Customer paid more than invoice total (e.g. invoice total 100, paid 200)
+        // 100 settles current invoice in full, excess 100 pays down previous customer debt!
+        paidTowardsPreviousDebt = paidAmount - total;
         this.recordDebtPayment({
           customer_id: finalCustomerId,
           customer_name: debtCustName,
-          amount: excessPaid,
+          amount: paidTowardsPreviousDebt,
           notes: `سداد من فائض فاتورة ${invoiceNumber} (مقدم ${paidAmount} - فاتورة ${total})`
         });
       }
     }
+
+    const updatedCustomer = finalCustomerId ? this.getCustomerById(finalCustomerId) : null;
+    const finalBalance = updatedCustomer ? updatedCustomer.remaining_debt : (previousBalance + remainingAmount);
 
     const newSale: Sale = {
       id: saleId,
@@ -400,6 +397,10 @@ class LocalDatabase {
       items_count: processedItems.reduce((sum, it) => sum + it.quantity, 0),
       items: processedItems,
       notes: saleData.notes || '',
+      previous_balance: previousBalance,
+      paid_towards_previous_debt: paidTowardsPreviousDebt,
+      final_balance: finalBalance,
+      void_status: 'active',
       created_at: new Date().toISOString()
     };
 
@@ -411,8 +412,11 @@ class LocalDatabase {
     return { success: true, sale: newSale };
   }
 
-  // --- VOID / CANCEL INVOICE & RESTORE STOCK ---
-  public voidInvoice(saleId: string): { success: boolean; message: string } {
+  // --- SMART VOID / CANCEL INVOICE & RESTORE STOCK ---
+  public voidInvoice(
+    saleId: string,
+    mode: 'all' | 'items_only' | 'payment_only' = 'all'
+  ): { success: boolean; message: string } {
     const sales = this.getSales();
     const saleIndex = sales.findIndex(s => s.id === saleId);
     if (saleIndex === -1) {
@@ -422,50 +426,74 @@ class LocalDatabase {
     const targetSale = sales[saleIndex];
     const products = this.getProducts();
 
-    // 1. Restore product quantities in inventory
-    for (const item of targetSale.items) {
-      const prodIndex = products.findIndex(p => p.id === item.product_id);
-      if (prodIndex !== -1) {
-        const prod = products[prodIndex];
-        const prevQty = prod.quantity;
-        const restoredQty = prevQty + item.quantity;
-        prod.quantity = restoredQty;
-        prod.updated_at = new Date().toISOString();
+    // 1. Restore product quantities in inventory (if mode is 'all' or 'items_only')
+    if (mode === 'all' || mode === 'items_only') {
+      for (const item of targetSale.items) {
+        const prodIndex = products.findIndex(p => p.id === item.product_id);
+        if (prodIndex !== -1) {
+          const prod = products[prodIndex];
+          const prevQty = prod.quantity;
+          const restoredQty = prevQty + item.quantity;
+          prod.quantity = restoredQty;
+          prod.updated_at = new Date().toISOString();
 
-        this.recordStockMovement({
-          product_id: prod.id,
-          product_name: prod.name,
-          type: 'adjustment',
-          quantity: item.quantity,
-          previous_quantity: prevQty,
-          new_quantity: restoredQty,
-          reason: `إلغاء واسترجاع أصناف فاتورة بيع رقم ${targetSale.invoice_number}`
-        });
-      }
-    }
-    this.set(STORAGE_KEYS.PRODUCTS, products);
-
-    // 2. Reverse associated customer debt if it was credit
-    if (targetSale.payment_type === 'debt' || targetSale.customer_id) {
-      const debts = this.getDebts();
-      const updatedDebts = debts.filter(d => d.sale_id !== saleId);
-      if (updatedDebts.length !== debts.length) {
-        this.set(STORAGE_KEYS.DEBTS, updatedDebts);
-        if (targetSale.customer_id) {
-          this.recalculateCustomerDebt(targetSale.customer_id);
+          this.recordStockMovement({
+            product_id: prod.id,
+            product_name: prod.name,
+            type: 'adjustment',
+            quantity: item.quantity,
+            previous_quantity: prevQty,
+            new_quantity: restoredQty,
+            reason: `إلغاء واسترجاع أصناف فاتورة بيع رقم ${targetSale.invoice_number}`
+          });
         }
       }
+      this.set(STORAGE_KEYS.PRODUCTS, products);
     }
 
-    // 3. Remove from sales list
-    sales.splice(saleIndex, 1);
+    // 2. Reverse associated customer debt / payments
+    if (targetSale.customer_id) {
+      const debts = this.getDebts();
+      const payments = this.getDebtPayments();
+
+      if (mode === 'all' || mode === 'items_only') {
+        // Remove debt record tied to this invoice
+        const updatedDebts = debts.filter(d => d.sale_id !== saleId);
+        this.set(STORAGE_KEYS.DEBTS, updatedDebts);
+      }
+
+      if (mode === 'all' || mode === 'payment_only') {
+        // Remove excess payment tied to this invoice if exists
+        const updatedPayments = payments.filter(p => !p.notes?.includes(targetSale.invoice_number));
+        this.set(STORAGE_KEYS.DEBT_PAYMENTS, updatedPayments);
+      }
+
+      this.recalculateCustomerDebt(targetSale.customer_id);
+    }
+
+    // 3. Remove or update sales list
+    if (mode === 'all') {
+      sales.splice(saleIndex, 1);
+    } else if (mode === 'items_only') {
+      targetSale.void_status = 'items_voided';
+      targetSale.total = 0;
+      targetSale.items = [];
+    } else if (mode === 'payment_only') {
+      targetSale.void_status = 'payment_voided';
+      targetSale.paid_amount = targetSale.total;
+      targetSale.paid_towards_previous_debt = 0;
+    }
     this.set(STORAGE_KEYS.SALES, sales);
     this.triggerCloudSync();
 
-    return {
-      success: true,
-      message: `تم إلغاء الفاتورة ${targetSale.invoice_number} وإعادة جميع الأصناف المباعة إلى رصيد المخزن بنجاح.`
-    };
+    let message = `تم إلغاء الفاتورة ${targetSale.invoice_number} وإعادة جميع الأصناف المباعة إلى رصيد المخزن بنجاح.`;
+    if (mode === 'items_only') {
+      message = `تم استرجاع البضاعة للمخزن وتثبيت دفعة سداد الدين في حساب العميل بنجاح.`;
+    } else if (mode === 'payment_only') {
+      message = `تم إلغاء دفعة سداد الدين مع الإبقاء على مبيعات الفاتورة.`;
+    }
+
+    return { success: true, message };
   }
 
   // --- CUSTOMER STATEMENT & DAILY LEDGER ---
@@ -728,13 +756,14 @@ class LocalDatabase {
     return { success: true, payment: newPayment };
   }
 
-  private recalculateCustomerDebt(customerId: string) {
+  public recalculateCustomerDebt(customerId: string) {
     const debts = this.getDebts().filter(d => d.customer_id === customerId);
     const payments = this.getDebtPayments().filter(p => p.customer_id === customerId);
 
-    const totalDebt = debts.reduce((sum, d) => sum + d.amount, 0);
-    const totalPaid = payments.reduce((sum, p) => sum + p.amount, 0);
-    const remainingDebt = Math.max(0, totalDebt - totalPaid);
+    // Sum of remaining amounts across customer debts
+    const remainingDebt = debts.reduce((sum, d) => sum + (Number(d.remaining_amount) || 0), 0);
+    const totalDebt = debts.reduce((sum, d) => sum + (Number(d.amount) || 0), 0);
+    const totalPaid = Math.max(0, totalDebt - remainingDebt);
 
     const customers = this.getCustomers();
     const idx = customers.findIndex(c => c.id === customerId);

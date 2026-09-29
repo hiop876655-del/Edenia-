@@ -702,8 +702,8 @@ export function App() {
           settings={db.getSettings()}
           isOpen={!!viewingReceiptSale}
           onClose={() => setViewingReceiptSale(null)}
-          onVoid={(saleId) => {
-            db.voidInvoice(saleId);
+          onVoid={(saleId, mode) => {
+            db.voidInvoice(saleId, mode);
             setViewingReceiptSale(null);
           }}
         />
