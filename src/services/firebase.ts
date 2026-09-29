@@ -793,3 +793,134 @@ export async function getDatabaseTutorialSettingsFromFirebase(): Promise<Databas
   return defaultSettings;
 }
 
+// 17. POS Station Pairing & Live Cloud Barcode Stream (Phone <-> PC Station)
+export async function sendStationBarcodeScanInFirebase(
+  phone: string,
+  stationId: string,
+  scanData: { barcode: string; mode: 'sale' | 'return'; productName?: string }
+) {
+  const cleanPhone = phone.replace(/[^0-9]/g, '');
+  const cleanStation = (stationId || 'POS-1').trim().toUpperCase();
+  if (!cleanPhone || !scanData.barcode) return { success: false };
+
+  try {
+    const deviceId = getDeviceId();
+    const scanRef = doc(firestore, 'merchants', `m_${cleanPhone}`, 'stations', cleanStation, 'live_stream', 'scan_event');
+    const payload = {
+      barcode: scanData.barcode.trim(),
+      mode: scanData.mode || 'sale',
+      productName: scanData.productName || '',
+      stationId: cleanStation,
+      sentByDeviceId: deviceId,
+      timestamp: Date.now()
+    };
+
+    await setDoc(scanRef, payload);
+    return { success: true };
+  } catch (err) {
+    console.warn('Error broadcasting station barcode in firebase:', err);
+    return { success: false };
+  }
+}
+
+export function subscribeToStationBarcodeScanInFirebase(
+  phone: string,
+  stationId: string,
+  onScan: (scan: { barcode: string; mode: 'sale' | 'return'; timestamp: number; sentByDeviceId?: string }) => void
+): () => void {
+  const cleanPhone = phone.replace(/[^0-9]/g, '');
+  const cleanStation = (stationId || 'POS-1').trim().toUpperCase();
+  if (!cleanPhone) return () => {};
+
+  try {
+    const scanRef = doc(firestore, 'merchants', `m_${cleanPhone}`, 'stations', cleanStation, 'live_stream', 'scan_event');
+    let lastHandledTimestamp = Date.now();
+
+    const unsubscribe = onSnapshot(
+      scanRef,
+      { includeMetadataChanges: false },
+      (docSnap) => {
+        if (!docSnap.exists()) return;
+        const data = docSnap.data();
+        if (data && data.barcode && data.timestamp && data.timestamp > lastHandledTimestamp) {
+          lastHandledTimestamp = data.timestamp;
+          onScan({
+            barcode: data.barcode,
+            mode: data.mode || 'sale',
+            timestamp: data.timestamp,
+            sentByDeviceId: data.sentByDeviceId
+          });
+        }
+      },
+      (err) => {
+        console.warn('Station scan subscription error:', err);
+      }
+    );
+
+    return unsubscribe;
+  } catch (err) {
+    console.warn('Could not attach station scan listener:', err);
+    return () => {};
+  }
+}
+
+export async function pingStationPhonePresenceInFirebase(phone: string, stationId: string, phoneName?: string) {
+  const cleanPhone = phone.replace(/[^0-9]/g, '');
+  const cleanStation = (stationId || 'POS-1').trim().toUpperCase();
+  if (!cleanPhone) return;
+
+  try {
+    const presenceRef = doc(firestore, 'merchants', `m_${cleanPhone}`, 'stations', cleanStation, 'presence', 'phone');
+    await setDoc(
+      presenceRef,
+      {
+        isConnected: true,
+        deviceName: phoneName || 'هاتف الكاشير',
+        deviceId: getDeviceId(),
+        lastSeen: Date.now()
+      },
+      { merge: true }
+    );
+  } catch (err) {
+    console.warn('Presence ping error:', err);
+  }
+}
+
+export function subscribeToStationPhonePresenceInFirebase(
+  phone: string,
+  stationId: string,
+  onPresence: (presence: { isConnected: boolean; deviceName?: string; lastSeen?: number }) => void
+): () => void {
+  const cleanPhone = phone.replace(/[^0-9]/g, '');
+  const cleanStation = (stationId || 'POS-1').trim().toUpperCase();
+  if (!cleanPhone) return () => {};
+
+  try {
+    const presenceRef = doc(firestore, 'merchants', `m_${cleanPhone}`, 'stations', cleanStation, 'presence', 'phone');
+    const unsubscribe = onSnapshot(
+      presenceRef,
+      (docSnap) => {
+        if (!docSnap.exists()) {
+          onPresence({ isConnected: false });
+          return;
+        }
+        const data = docSnap.data();
+        const now = Date.now();
+        const isRecentlyActive = data && data.lastSeen && (now - data.lastSeen < 25000);
+        onPresence({
+          isConnected: Boolean(isRecentlyActive),
+          deviceName: data?.deviceName || 'هاتف الكاشير',
+          lastSeen: data?.lastSeen
+        });
+      },
+      (err) => {
+        console.warn('Presence subscription error:', err);
+      }
+    );
+    return unsubscribe;
+  } catch (err) {
+    console.warn('Could not attach presence listener:', err);
+    return () => {};
+  }
+}
+

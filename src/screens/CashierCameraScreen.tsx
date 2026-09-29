@@ -16,11 +16,18 @@ import {
   X,
   Info,
   ExternalLink,
-  Upload
+  Upload,
+  Smartphone,
+  QrCode,
+  Layers
 } from 'lucide-react';
 import { BrowserMultiFormatReader } from '@zxing/library';
 import { db } from '../services/db';
 import { Product, AppSettings, UserAccount } from '../types';
+import {
+  sendStationBarcodeScanInFirebase,
+  pingStationPhonePresenceInFirebase
+} from '../services/firebase';
 
 interface CashierCameraScreenProps {
   onBack: () => void;
@@ -38,12 +45,21 @@ export const CashierCameraScreen: React.FC<CashierCameraScreenProps> = ({
   const [products, setProducts] = useState<Product[]>([]);
   const [settings, setSettings] = useState<AppSettings>(db.getSettings());
 
-  // Camera state
+  // Station Pairing state (Link this phone specifically to a PC station e.g. POS-1, POS-2)
+  const [stationId, setStationId] = useState<string>(() => {
+    return localStorage.getItem('idenia_paired_station_id') || 'POS-1';
+  });
+  const [isStationModalOpen, setIsStationModalOpen] = useState<boolean>(false);
+  const [stationInput, setStationInput] = useState<string>('');
+
+  // Camera state & multi-lens switching
   const [cameraActive, setCameraActive] = useState<boolean>(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [isPermissionDenied, setIsPermissionDenied] = useState<boolean>(false);
   const [isStartingCamera, setIsStartingCamera] = useState<boolean>(false);
   const [facingMode, setFacingMode] = useState<'environment' | 'user'>('environment');
+  const [availableVideoDevices, setAvailableVideoDevices] = useState<MediaDeviceInfo[]>([]);
+  const [currentDeviceIndex, setCurrentDeviceIndex] = useState<number>(0);
   const [torchAvailable, setTorchAvailable] = useState<boolean>(false);
   const [torchOn, setTorchOn] = useState<boolean>(false);
   const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
@@ -76,7 +92,23 @@ export const CashierCameraScreen: React.FC<CashierCameraScreenProps> = ({
 
   useEffect(() => {
     loadData();
+    const handleDb = () => loadData();
+    window.addEventListener('idenia_db_changed', handleDb);
+    return () => window.removeEventListener('idenia_db_changed', handleDb);
   }, []);
+
+  // Ping phone presence to paired station in Firestore every 10 seconds
+  useEffect(() => {
+    const phone = user?.phone || db.getUser()?.phone;
+    if (!phone) return;
+
+    pingStationPhonePresenceInFirebase(phone, stationId, 'هاتف الكاشير');
+    const interval = setInterval(() => {
+      pingStationPhonePresenceInFirebase(phone, stationId, 'هاتف الكاشير');
+    }, 12000);
+
+    return () => clearInterval(interval);
+  }, [user?.phone, stationId]);
 
   // Audio Beep
   const playBeep = (type: 'sale' | 'return' | 'error' = 'sale') => {
@@ -92,10 +124,10 @@ export const CashierCameraScreen: React.FC<CashierCameraScreenProps> = ({
 
       if (type === 'sale') {
         osc.frequency.setValueAtTime(1400, ctx.currentTime);
-        gain.gain.setValueAtTime(0.25, ctx.currentTime);
-        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.12);
+        gain.gain.setValueAtTime(0.2, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.15);
         osc.start(ctx.currentTime);
-        osc.stop(ctx.currentTime + 0.12);
+        osc.stop(ctx.currentTime + 0.15);
       } else if (type === 'return') {
         osc.frequency.setValueAtTime(950, ctx.currentTime);
         gain.gain.setValueAtTime(0.25, ctx.currentTime);
@@ -136,8 +168,26 @@ export const CashierCameraScreen: React.FC<CashierCameraScreenProps> = ({
     setTorchAvailable(false);
   };
 
-  // Start native camera with progressive multi-stage fallback
-  const startCamera = async (targetFacing: 'environment' | 'user' = facingMode) => {
+  // Enumerate video devices to detect multiple lenses on mobile
+  const enumerateCameras = async () => {
+    try {
+      if (navigator.mediaDevices && navigator.mediaDevices.enumerateDevices) {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const videoInputs = devices.filter(d => d.kind === 'videoinput');
+        setAvailableVideoDevices(videoInputs);
+        return videoInputs;
+      }
+    } catch (err) {
+      console.warn('Could not enumerate cameras:', err);
+    }
+    return [];
+  };
+
+  // Start native camera with reliable mobile initialization & lens selection
+  const startCamera = async (
+    targetFacing: 'environment' | 'user' = facingMode,
+    forcedDeviceId?: string
+  ) => {
     stopCamera();
     setCameraError(null);
     setIsPermissionDenied(false);
@@ -149,44 +199,58 @@ export const CashierCameraScreen: React.FC<CashierCameraScreenProps> = ({
       return;
     }
 
-    // Constraint configurations from high-clarity to basic universal
-    const constraintConfigs: MediaStreamConstraints[] = [
-      {
-        video: {
-          facingMode: { ideal: targetFacing },
-          width: { ideal: 1280 },
-          height: { ideal: 720 }
-        },
-        audio: false
-      },
-      {
-        video: {
-          facingMode: targetFacing
-        },
-        audio: false
-      },
-      {
-        video: {
-          facingMode: targetFacing === 'environment' ? 'user' : 'environment'
-        },
-        audio: false
-      },
-      {
-        video: true,
-        audio: false
-      }
-    ];
-
     let acquiredStream: MediaStream | null = null;
     let lastErr: any = null;
 
-    for (const constraints of constraintConfigs) {
+    // If a specific camera device ID is requested (e.g. switching between rear lenses):
+    if (forcedDeviceId) {
       try {
-        acquiredStream = await navigator.mediaDevices.getUserMedia(constraints);
-        if (acquiredStream) break;
-      } catch (err: any) {
-        lastErr = err;
-        console.warn('Camera fallback attempt with constraints:', constraints, err);
+        acquiredStream = await navigator.mediaDevices.getUserMedia({
+          video: { deviceId: { exact: forcedDeviceId } },
+          audio: false
+        });
+      } catch (err) {
+        console.warn('Forced deviceId stream failed, trying fallback:', err);
+      }
+    }
+
+    if (!acquiredStream) {
+      // Progressive constraint fallback list
+      const constraintConfigs: MediaStreamConstraints[] = [
+        {
+          video: {
+            facingMode: { ideal: targetFacing },
+            width: { ideal: 1280 },
+            height: { ideal: 720 }
+          },
+          audio: false
+        },
+        {
+          video: {
+            facingMode: targetFacing
+          },
+          audio: false
+        },
+        {
+          video: {
+            facingMode: targetFacing === 'environment' ? 'user' : 'environment'
+          },
+          audio: false
+        },
+        {
+          video: true,
+          audio: false
+        }
+      ];
+
+      for (const constraints of constraintConfigs) {
+        try {
+          acquiredStream = await navigator.mediaDevices.getUserMedia(constraints);
+          if (acquiredStream) break;
+        } catch (err: any) {
+          lastErr = err;
+          console.warn('Camera fallback attempt with constraints:', constraints, err);
+        }
       }
     }
 
@@ -213,7 +277,7 @@ export const CashierCameraScreen: React.FC<CashierCameraScreenProps> = ({
     try {
       streamRef.current = acquiredStream;
 
-      // Check if torch/flash is supported on track
+      // Check if torch/flash is supported on active track
       const videoTrack = acquiredStream.getVideoTracks()[0];
       if (videoTrack) {
         const capabilities: any = typeof videoTrack.getCapabilities === 'function' ? videoTrack.getCapabilities() : {};
@@ -222,10 +286,38 @@ export const CashierCameraScreen: React.FC<CashierCameraScreenProps> = ({
         }
       }
 
+      // Update camera devices list for lens switching
+      enumerateCameras().catch(() => {});
+
       if (videoRef.current) {
-        videoRef.current.srcObject = acquiredStream;
-        videoRef.current.setAttribute('playsinline', 'true');
-        await videoRef.current.play();
+        const video = videoRef.current;
+        video.srcObject = acquiredStream;
+        video.muted = true;
+        video.setAttribute('playsinline', 'true');
+        video.setAttribute('webkit-playsinline', 'true');
+        video.setAttribute('autoplay', 'true');
+
+        // Robust video frame synchronization: wait for video dimensions before calling play
+        // This solves the black screen on mobile Chrome/Android where play() was resolving before video frames arrived
+        await new Promise<void>(resolve => {
+          if (video.videoWidth > 0 && video.videoHeight > 0) {
+            resolve();
+          } else {
+            const onMeta = () => {
+              video.removeEventListener('loadedmetadata', onMeta);
+              resolve();
+            };
+            video.addEventListener('loadedmetadata', onMeta);
+            setTimeout(resolve, 800);
+          }
+        });
+
+        try {
+          await video.play();
+        } catch (playErr) {
+          console.warn('Video play caught:', playErr);
+        }
+
         setCameraActive(true);
         startScannerLoop();
       }
@@ -234,6 +326,25 @@ export const CashierCameraScreen: React.FC<CashierCameraScreenProps> = ({
       setCameraError('تعذر عرض بث الفيديو للكاميرا.');
     } finally {
       setIsStartingCamera(false);
+    }
+  };
+
+  // Switch between physical lenses (e.g. multiple back cameras on modern phones)
+  const switchRearLens = async () => {
+    const devices = availableVideoDevices.length > 0 ? availableVideoDevices : await enumerateCameras();
+    if (devices.length <= 1) {
+      // Toggle facing mode if only 1 device known
+      toggleCameraFacing();
+      return;
+    }
+
+    const nextIndex = (currentDeviceIndex + 1) % devices.length;
+    setCurrentDeviceIndex(nextIndex);
+    const targetDevice = devices[nextIndex];
+    if (targetDevice && targetDevice.deviceId) {
+      await startCamera(facingMode, targetDevice.deviceId);
+    } else {
+      await startCamera(facingMode);
     }
   };
 
@@ -249,46 +360,21 @@ export const CashierCameraScreen: React.FC<CashierCameraScreenProps> = ({
         advanced: [{ torch: nextTorch }]
       });
       setTorchOn(nextTorch);
-    } catch (e) {
-      console.warn('Torch not supported or failed:', e);
+    } catch (err) {
+      console.warn('Torch constraint error:', err);
     }
   };
 
-  // Toggle Camera Front / Back
+  // Toggle Facing Mode (Back vs Front)
   const toggleCameraFacing = () => {
     const nextFacing = facingMode === 'environment' ? 'user' : 'environment';
     setFacingMode(nextFacing);
     startCamera(nextFacing);
   };
 
-  // Dual Barcode Scanner Loop: Native BarcodeDetector + ZXing Fallback
+  // Continuous Barcode Reader Scanner Loop
   const startScannerLoop = () => {
-    if (scanIntervalRef.current) {
-      clearInterval(scanIntervalRef.current);
-    }
-
-    const hasNativeDetector = typeof (window as any).BarcodeDetector !== 'undefined';
-    let nativeDetector: any = null;
-
-    if (hasNativeDetector) {
-      try {
-        nativeDetector = new (window as any).BarcodeDetector({
-          formats: [
-            'qr_code',
-            'ean_13',
-            'ean_8',
-            'code_128',
-            'code_39',
-            'upc_a',
-            'upc_e',
-            'itf',
-            'codabar'
-          ]
-        });
-      } catch {
-        nativeDetector = null;
-      }
-    }
+    if (scanIntervalRef.current) clearInterval(scanIntervalRef.current);
 
     if (!zxingReaderRef.current) {
       zxingReaderRef.current = new BrowserMultiFormatReader();
@@ -297,80 +383,24 @@ export const CashierCameraScreen: React.FC<CashierCameraScreenProps> = ({
     scanIntervalRef.current = setInterval(async () => {
       if (!videoRef.current || videoRef.current.readyState < 2) return;
 
-      // 1. Try Native BarcodeDetector (High performance hardware-accelerated)
-      if (nativeDetector) {
-        try {
-          const barcodes = await nativeDetector.detect(videoRef.current);
-          if (barcodes && barcodes.length > 0) {
-            const raw = barcodes[0].rawValue;
-            if (raw) {
-              handleBarcodeScanned(raw);
-              return;
-            }
-          }
-        } catch {
-          // Fall through to ZXing
+      try {
+        const result = await zxingReaderRef.current?.decodeFromVideoElement(videoRef.current);
+        if (result && result.getText()) {
+          handleBarcodeScanned(result.getText());
         }
+      } catch {
+        // Normal if frame has no barcode
       }
-
-      // 2. Try ZXing Multi-Format Frame Scanning (Universal fallback)
-      if (zxingReaderRef.current && videoRef.current.readyState >= 2) {
-        try {
-          const zxResult = await zxingReaderRef.current.decodeFromVideoElement(videoRef.current);
-          if (zxResult && zxResult.getText()) {
-            handleBarcodeScanned(zxResult.getText());
-          }
-        } catch {
-          // Frame not containing barcode -> Normal
-        }
-      }
-    }, 200);
+    }, 180);
   };
 
-  // Decode from native photo upload (bypasses browser WebRTC permission restrictions)
-  const handlePhotoCapture = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    try {
-      const reader = new FileReader();
-      reader.onload = async (event) => {
-        const dataUrl = event.target?.result as string;
-        if (!dataUrl) return;
-
-        const img = new Image();
-        img.onload = async () => {
-          try {
-            if (!zxingReaderRef.current) {
-              zxingReaderRef.current = new BrowserMultiFormatReader();
-            }
-            const zxResult = await zxingReaderRef.current.decodeFromImageElement(img);
-            if (zxResult && zxResult.getText()) {
-              handleBarcodeScanned(zxResult.getText());
-            } else {
-              alert('لم يتم العثور على باركود واضح في الصورة الملتقطة. يرجى التأكد من وضوح خطوط الباركود وإعادة التصوير.');
-            }
-          } catch {
-            alert('تعذر قراءة الباركود من الصورة. يرجى التأكد من تسليط الكاميرا على الباركود بوضوح.');
-          }
-        };
-        img.src = dataUrl;
-      };
-      reader.readAsDataURL(file);
-    } catch (err) {
-      console.warn('Photo decode error:', err);
-    } finally {
-      if (e.target) e.target.value = '';
-    }
-  };
-
-  // Handle scanned barcode according to active mode ('sale' or 'return')
+  // Handle scanned barcode according to active mode and send to paired PC station
   const handleBarcodeScanned = (barcode: string) => {
     const clean = barcode.trim();
     if (!clean) return;
 
     const now = Date.now();
-    // Debounce duplicate scans within 1.5 seconds unless different barcode
+    // Debounce duplicate scans within 1.5 seconds
     if (lastScannedBarcodeRef.current === clean && now - lastScanTimestampRef.current < 1500) {
       return;
     }
@@ -378,11 +408,54 @@ export const CashierCameraScreen: React.FC<CashierCameraScreenProps> = ({
     lastScannedBarcodeRef.current = clean;
     lastScanTimestampRef.current = now;
 
-    // Refresh products list to ensure up-to-date quantities
+    // Check if the scanned barcode is actually a Station Pairing QR Code from PC screen!
+    try {
+      if (clean.includes('IDENIA_POS_PAIRING') || clean.startsWith('{')) {
+        const parsed = JSON.parse(clean);
+        if (parsed.type === 'IDENIA_POS_PAIRING' && parsed.stationId) {
+          const newStation = parsed.stationId.toUpperCase();
+          setStationId(newStation);
+          localStorage.setItem('idenia_paired_station_id', newStation);
+          playBeep('sale');
+          alert(`تم ربط الهاتف بنجاح بمحطة (${newStation})! الآن أي صنف تمسحه سيدخل في فاتورة هذه الشاشة مباشرة.`);
+          return;
+        }
+      }
+    } catch {}
+
+    // Find product in store inventory
     const currentProducts = db.getProducts();
     const targetProduct = currentProducts.find(
       p => p.barcode && p.barcode.trim().toLowerCase() === clean.toLowerCase()
     );
+
+    const phone = user?.phone || db.getUser()?.phone || '';
+
+    // 1. Send barcode to the paired PC station in Firestore cloud in real-time
+    if (phone) {
+      sendStationBarcodeScanInFirebase(phone, stationId, {
+        barcode: clean,
+        mode,
+        productName: targetProduct ? targetProduct.name : `صنف #${clean}`
+      }).catch(console.warn);
+    }
+
+    // 2. Broadcast locally via localStorage / BroadcastChannel for zero-latency local pairing
+    try {
+      const stationScanPayload = JSON.stringify({
+        type: 'STATION_BARCODE_SCANNED',
+        barcode: clean,
+        stationId: stationId.toUpperCase(),
+        mode,
+        timestamp: now
+      });
+      localStorage.setItem(`idenia_station_scan_${stationId.toUpperCase()}`, stationScanPayload);
+      if (typeof BroadcastChannel !== 'undefined') {
+        const bc = new BroadcastChannel(`idenia_station_${stationId.toUpperCase()}`);
+        bc.postMessage({ barcode: clean, mode, timestamp: now });
+        bc.close();
+      }
+    } catch {}
 
     if (!targetProduct) {
       playBeep('error');
@@ -402,102 +475,57 @@ export const CashierCameraScreen: React.FC<CashierCameraScreenProps> = ({
         },
         time: now,
         mode,
-        message: 'الصنف غير مسجل في المخزن! يرجى إضافته أولاً من قسم المنتجات.'
+        message: `تم إرسال الباركود (${clean}) لمحطة (${stationId}). الصنف غير مسجل بالمخزن.`
       });
       return;
     }
 
-    if (mode === 'sale') {
-      // 1. SALE MODE:
-      if (targetProduct.quantity <= 0) {
-        playBeep('error');
-        setLastScannedProduct({
-          product: targetProduct,
-          time: now,
-          mode: 'sale',
-          message: `نفد المخزون! رصيد (${targetProduct.name}) في المخزن هو (0).`
-        });
-        return;
-      }
+    playBeep(mode === 'sale' ? 'sale' : 'return');
+    setScanCount(prev => prev + 1);
 
-      // Deduct from stock
-      db.adjustStock(
-        targetProduct.id,
-        -1,
-        `خصم تلقائي - كاميرا الكاشير المحمولة (${targetProduct.name})`
-      );
+    setLastScannedProduct({
+      product: targetProduct,
+      time: now,
+      mode,
+      message: `تم إرسال الصنف فوراً إلى فاتورة محطة (${stationId}) بنجاح!`
+    });
+  };
 
-      playBeep('sale');
-      setScanCount(prev => prev + 1);
+  // Decode from native photo upload
+  const handlePhotoCapture = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
 
-      // Broadcast event across device, tabs, and network POS sessions
-      try {
-        const eventPayload = {
-          type: 'BARCODE_SCANNED',
-          barcode: clean,
-          product_id: targetProduct.id,
-          product_name: targetProduct.name,
-          mode: 'sale',
-          time: now
+    try {
+      const reader = new FileReader();
+      reader.onload = async event => {
+        const dataUrl = event.target?.result as string;
+        if (!dataUrl) return;
+
+        const img = new Image();
+        img.onload = async () => {
+          try {
+            if (!zxingReaderRef.current) {
+              zxingReaderRef.current = new BrowserMultiFormatReader();
+            }
+            const zxResult = await zxingReaderRef.current.decodeFromImageElement(img);
+            if (zxResult && zxResult.getText()) {
+              handleBarcodeScanned(zxResult.getText());
+            } else {
+              alert('لم يتم العثور على باركود واضح في الصورة الملتقطة.');
+            }
+          } catch {
+            alert('تعذر قراءة الباركود من الصورة.');
+          }
         };
-        if (typeof BroadcastChannel !== 'undefined') {
-          const bc = new BroadcastChannel('idenia_pos_barcode_sync');
-          bc.postMessage(eventPayload);
-          bc.close();
-        }
-        localStorage.setItem(
-          'idenia_last_scanned_barcode_event',
-          JSON.stringify(eventPayload)
-        );
-      } catch {}
-
-      setLastScannedProduct({
-        product: targetProduct,
-        time: now,
-        mode: 'sale',
-        message: `تم الخصم والإضافة للفاتورة بنجاح! الرصيد المتبقي: ${targetProduct.quantity - 1}`
-      });
-    } else {
-      // 2. RETURN / RESTOCK MODE:
-      db.adjustStock(
-        targetProduct.id,
-        1,
-        `استرجاع صنف للمخزن عبر كاميرا الهاتف (${targetProduct.name})`
-      );
-
-      playBeep('return');
-      setScanCount(prev => prev + 1);
-
-      // Broadcast event
-      try {
-        const eventPayload = {
-          type: 'BARCODE_SCANNED',
-          barcode: clean,
-          product_id: targetProduct.id,
-          product_name: targetProduct.name,
-          mode: 'return',
-          time: now
-        };
-        if (typeof BroadcastChannel !== 'undefined') {
-          const bc = new BroadcastChannel('idenia_pos_barcode_sync');
-          bc.postMessage(eventPayload);
-          bc.close();
-        }
-        localStorage.setItem(
-          'idenia_last_scanned_barcode_event',
-          JSON.stringify(eventPayload)
-        );
-      } catch {}
-
-      setLastScannedProduct({
-        product: targetProduct,
-        time: now,
-        mode: 'return',
-        message: `تم استرجاع الصنف وزيادة رصيد المخزن بنجاح! الرصيد الجديد: ${targetProduct.quantity + 1}`
-      });
+        img.src = dataUrl;
+      };
+      reader.readAsDataURL(file);
+    } catch (err) {
+      console.warn('Photo decode error:', err);
+    } finally {
+      if (e.target) e.target.value = '';
     }
-
-    loadData();
   };
 
   const handleManualSubmit = (e: React.FormEvent) => {
@@ -508,11 +536,18 @@ export const CashierCameraScreen: React.FC<CashierCameraScreenProps> = ({
     setIsManualInputOpen(false);
   };
 
+  const handleSelectStation = (newStation: string) => {
+    const clean = newStation.trim().toUpperCase() || 'POS-1';
+    setStationId(clean);
+    localStorage.setItem('idenia_paired_station_id', clean);
+    setIsStationModalOpen(false);
+    playBeep('sale');
+  };
+
+  // Auto-start camera on mount
   useEffect(() => {
     startCamera('environment');
-    return () => {
-      stopCamera();
-    };
+    return () => stopCamera();
   }, []);
 
   return (
@@ -531,22 +566,39 @@ export const CashierCameraScreen: React.FC<CashierCameraScreenProps> = ({
       />
 
       {/* Top Streamlined Bar */}
-      <header className="absolute top-0 left-0 right-0 z-20 flex items-center justify-between px-4 py-3 bg-gradient-to-b from-black/90 via-black/50 to-transparent">
+      <header className="absolute top-0 left-0 right-0 z-20 flex items-center justify-between px-3 py-2.5 bg-gradient-to-b from-black/90 via-black/60 to-transparent">
         <button
           onClick={onBack}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/20 hover:bg-white/30 backdrop-blur-md text-white text-xs font-bold transition-all cursor-pointer"
+          className="flex items-center gap-1 px-3 py-1.5 rounded-full bg-white/20 hover:bg-white/30 backdrop-blur-md text-white text-xs font-bold transition-all cursor-pointer"
         >
           <ArrowRight className="w-4 h-4" />
           <span>رجوع</span>
         </button>
 
+        {/* Station Pairing Badge with Switch Button */}
+        <button
+          onClick={() => {
+            setStationInput(stationId);
+            setIsStationModalOpen(true);
+          }}
+          className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-600/90 hover:bg-emerald-500 backdrop-blur-md border border-emerald-400/40 text-[11px] font-black text-white shadow-md cursor-pointer transition-all active:scale-95"
+          title="اضغط لتبديل محطة الكاشير المربوطة"
+        >
+          <Smartphone className="w-3.5 h-3.5 text-emerald-200" />
+          <span>نقطة: {stationId}</span>
+          <span className="text-[10px] bg-white/20 px-1 py-0.5 rounded text-emerald-100">تبديل 🔄</span>
+        </button>
+
+        {/* Action Controls */}
         <div className="flex items-center gap-1.5 sm:gap-2">
-          {cameraActive && (
-            <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-600/80 backdrop-blur-md border border-emerald-400/40 text-[11px] font-black text-white shadow-xs">
-              <span className="w-2 h-2 rounded-full bg-emerald-300 animate-ping" />
-              <span>كاميرا الكاشير نشطة</span>
-            </div>
-          )}
+          {/* Switch Rear Lens Button (solves multi-camera black screen) */}
+          <button
+            onClick={switchRearLens}
+            className="p-2 rounded-full bg-white/20 hover:bg-white/30 backdrop-blur-md text-white transition-all cursor-pointer"
+            title="تبديل العدسة الخلفية (إذا ظهرت شاشة سوداء)"
+          >
+            <Layers className="w-4 h-4 text-emerald-300" />
+          </button>
 
           {/* Torch Toggle */}
           {torchAvailable && (
@@ -565,27 +617,9 @@ export const CashierCameraScreen: React.FC<CashierCameraScreenProps> = ({
           <button
             onClick={() => fileInputRef.current?.click()}
             className="p-2 rounded-full bg-white/20 hover:bg-white/30 backdrop-blur-md text-white transition-all cursor-pointer"
-            title="التقاط صورة للباركود بكاميرا الهاتف"
+            title="تصوير مباشر للباركود"
           >
             <Camera className="w-4 h-4 text-emerald-300" />
-          </button>
-
-          {/* Switch Camera Front / Back */}
-          <button
-            onClick={toggleCameraFacing}
-            className="p-2 rounded-full bg-white/20 hover:bg-white/30 backdrop-blur-md text-white transition-all cursor-pointer"
-            title="تبديل الكاميرا (خلفية / أمامية)"
-          >
-            <SwitchCamera className="w-4 h-4" />
-          </button>
-
-          {/* Manual Barcode Input button */}
-          <button
-            onClick={() => setIsManualInputOpen(true)}
-            className="p-2 rounded-full bg-white/20 hover:bg-white/30 backdrop-blur-md text-white transition-all cursor-pointer"
-            title="إدخال باركود يدوياً"
-          >
-            <Keyboard className="w-4 h-4" />
           </button>
 
           {/* Sound Mute Toggle */}
@@ -600,13 +634,13 @@ export const CashierCameraScreen: React.FC<CashierCameraScreenProps> = ({
       </header>
 
       {/* Main Fullscreen Video Viewfinder */}
-      <div className="relative flex-1 w-full h-full flex items-center justify-center bg-black overflow-hidden">
+      <div className="relative flex-1 w-full h-full min-h-[300px] flex items-center justify-center bg-black overflow-hidden">
         <video
           ref={videoRef}
           playsInline
           autoPlay
           muted
-          className="w-full h-full object-cover"
+          className="w-full h-full object-cover min-h-[300px]"
         />
 
         {/* Laser Targeting Viewfinder Overlay */}
@@ -621,11 +655,7 @@ export const CashierCameraScreen: React.FC<CashierCameraScreenProps> = ({
 
               {/* Glowing Laser Scan Line */}
               <div
-                className={`absolute left-0 right-0 h-0.5 shadow-lg ${
-                  mode === 'sale'
-                    ? 'bg-emerald-400 shadow-emerald-400/80'
-                    : 'bg-amber-400 shadow-amber-400/80'
-                } animate-scan-laser`}
+                className="absolute left-0 right-0 h-0.5 shadow-lg bg-emerald-400 shadow-emerald-400/80 animate-scan-laser"
                 style={{
                   animation: 'scanLaser 2s ease-in-out infinite alternate'
                 }}
@@ -633,25 +663,12 @@ export const CashierCameraScreen: React.FC<CashierCameraScreenProps> = ({
 
               {/* Center target dot */}
               <div className="absolute inset-0 flex items-center justify-center">
-                <div
-                  className={`w-3 h-3 rounded-full opacity-60 ${
-                    mode === 'sale' ? 'bg-emerald-400' : 'bg-amber-400'
-                  }`}
-                />
+                <div className="w-3 h-3 rounded-full opacity-60 bg-emerald-400" />
               </div>
             </div>
 
-            <p className="mt-4 text-xs font-bold text-white/80 bg-black/50 backdrop-blur-md px-4 py-1.5 rounded-full border border-white/10 shadow-lg text-center">
-              وجّه الكاميرا نحو باركود الصنف لتنفيذ عملية{' '}
-              <span
-                className={
-                  mode === 'sale'
-                    ? 'text-emerald-400 font-black'
-                    : 'text-amber-400 font-black'
-                }
-              >
-                {mode === 'sale' ? '(البيع والخصم)' : '(الاسترجاع والإضافة)'}
-              </span>
+            <p className="mt-4 text-xs font-bold text-white/90 bg-black/60 backdrop-blur-md px-4 py-1.5 rounded-full border border-white/10 shadow-lg text-center">
+              وجّه الكاميرا نحو الباركود لإرساله فوراً إلى محطة <span className="text-emerald-400 font-black">({stationId})</span>
             </p>
           </div>
         )}
@@ -659,44 +676,14 @@ export const CashierCameraScreen: React.FC<CashierCameraScreenProps> = ({
         {/* Live Scanned Product Feedback Toast Card */}
         {lastScannedProduct && (
           <div className="absolute top-16 left-4 right-4 z-30 max-w-md mx-auto animate-in slide-in-from-top-4 duration-200">
-            <div
-              className={`p-3.5 rounded-2xl backdrop-blur-xl border shadow-2xl flex items-center gap-3 ${
-                lastScannedProduct.product.id
-                  ? lastScannedProduct.mode === 'sale'
-                    ? 'bg-emerald-950/85 border-emerald-500/50 text-emerald-100'
-                    : 'bg-amber-950/85 border-amber-500/50 text-amber-100'
-                  : 'bg-rose-950/85 border-rose-500/50 text-rose-100'
-              }`}
-            >
-              <div
-                className={`w-11 h-11 rounded-xl flex items-center justify-center shrink-0 ${
-                  lastScannedProduct.product.id
-                    ? lastScannedProduct.mode === 'sale'
-                      ? 'bg-emerald-500/20 text-emerald-400'
-                      : 'bg-amber-500/20 text-amber-400'
-                    : 'bg-rose-500/20 text-rose-400'
-                }`}
-              >
-                {lastScannedProduct.product.id ? (
-                  lastScannedProduct.mode === 'sale' ? (
-                    <CheckCircle2 className="w-6 h-6" />
-                  ) : (
-                    <PackagePlus className="w-6 h-6" />
-                  )
-                ) : (
-                  <AlertCircle className="w-6 h-6" />
-                )}
+            <div className="p-3.5 rounded-2xl backdrop-blur-xl border shadow-2xl flex items-center gap-3 bg-emerald-950/85 border-emerald-500/50 text-emerald-100">
+              <div className="w-11 h-11 rounded-xl flex items-center justify-center shrink-0 bg-emerald-500/20 text-emerald-400">
+                <CheckCircle2 className="w-6 h-6" />
               </div>
 
               <div className="flex-1 min-w-0">
                 <div className="flex items-center justify-between text-[11px] text-white/70">
-                  <span>
-                    {lastScannedProduct.product.id
-                      ? lastScannedProduct.mode === 'sale'
-                        ? 'تم تسجيل بيع الصنف'
-                        : 'تم استرجاع الصنف للمخزن'
-                      : 'تنبيه'}
-                  </span>
+                  <span>تم الإرسال لمحطة {stationId}</span>
                   <span className="font-mono text-[10px]">
                     #{lastScannedProduct.product.barcode}
                   </span>
@@ -704,7 +691,7 @@ export const CashierCameraScreen: React.FC<CashierCameraScreenProps> = ({
                 <h4 className="font-black text-sm text-white truncate mt-0.5">
                   {lastScannedProduct.product.name}
                 </h4>
-                <p className="text-[11px] font-bold text-white/90 mt-0.5">
+                <p className="text-[11px] font-bold text-emerald-300 mt-0.5">
                   {lastScannedProduct.message}
                 </p>
               </div>
@@ -725,41 +712,36 @@ export const CashierCameraScreen: React.FC<CashierCameraScreenProps> = ({
                   كاميرا قارئ الباركود
                 </h3>
                 <p className="text-xs text-gray-300">
-                  يمكنك التصوير المباشر للباركود بكاميرا الهاتف أو إعادة تشغيل البث
+                  {cameraError}
                 </p>
               </div>
 
-              {/* Action Buttons */}
               <div className="space-y-2.5 pt-2">
-                {/* 1. Instant Camera Capture */}
+                <button
+                  type="button"
+                  onClick={switchRearLens}
+                  className="w-full py-3 px-4 rounded-2xl bg-amber-600 hover:bg-amber-500 text-white font-black text-xs shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <Layers className="w-4 h-4" />
+                  <span>تبديل عدسة الكاميرا الخلفية 🔄</span>
+                </button>
+
                 <button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
                   className="w-full py-3.5 px-4 rounded-2xl bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-500 hover:to-green-500 text-white font-black text-xs shadow-lg transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-98"
                 >
                   <Camera className="w-4 h-4" />
-                  <span>📸 التقاط صورة للباركود بالكاميرا مباشرة</span>
+                  <span>التقاط صورة للباركود بالكاميرا فوراً</span>
                 </button>
 
-                {/* 2. Retry Live Stream */}
                 <button
                   type="button"
                   onClick={() => startCamera('environment')}
-                  disabled={isStartingCamera}
-                  className="w-full py-3 px-4 rounded-2xl bg-white/10 hover:bg-white/20 disabled:opacity-50 text-white font-bold text-xs border border-white/10 transition-all flex items-center justify-center gap-2 cursor-pointer"
+                  className="w-full py-3 px-4 rounded-2xl bg-zinc-800 hover:bg-zinc-700 text-white font-bold text-xs transition-colors flex items-center justify-center gap-2 cursor-pointer"
                 >
-                  <RefreshCw className={`w-4 h-4 ${isStartingCamera ? 'animate-spin' : ''}`} />
-                  <span>{isStartingCamera ? 'جاري فتح الكاميرا...' : '🔄 إعادة تشغيل بث الكاميرا'}</span>
-                </button>
-
-                {/* Manual Barcode Input button */}
-                <button
-                  type="button"
-                  onClick={() => setIsManualInputOpen(true)}
-                  className="w-full py-2.5 px-3 rounded-2xl bg-zinc-800 hover:bg-zinc-700 text-gray-200 font-bold text-xs border border-zinc-700 transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
-                >
-                  <Keyboard className="w-4 h-4 text-amber-400" />
-                  <span>إدخال رقم الباركود يدوياً</span>
+                  <RefreshCw className="w-4 h-4" />
+                  <span>إعادة محاولة فتح الكاميرا</span>
                 </button>
               </div>
             </div>
@@ -767,136 +749,151 @@ export const CashierCameraScreen: React.FC<CashierCameraScreenProps> = ({
         )}
       </div>
 
-      {/* Bottom Ultra-Clean Dual Mode Controls */}
-      <footer className="absolute bottom-0 left-0 right-0 z-20 p-4 pb-6 bg-gradient-to-t from-black/95 via-black/80 to-transparent">
-        <div className="max-w-md mx-auto space-y-3">
-          {/* Scanned Badge Counter & Quick Actions */}
-          <div className="flex items-center justify-between px-3 text-[11px] text-gray-300">
-            <span>العمليات المسجلة بالهاتف:</span>
-            <div className="flex items-center gap-2.5">
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
-                className="text-[10px] text-emerald-400 hover:text-emerald-300 font-bold underline flex items-center gap-1 cursor-pointer"
-              >
-                <Camera className="w-3 h-3" />
-                <span>تصوير</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setIsManualInputOpen(true)}
-                className="text-[10px] text-amber-400 hover:text-amber-300 font-bold underline cursor-pointer"
-              >
-                إدخال يدوي
-              </button>
-              <span className="font-mono font-black text-white bg-white/10 px-2 py-0.5 rounded-lg">
-                {scanCount} أصناف
-              </span>
-            </div>
-          </div>
+      {/* Bottom Floating Bar */}
+      <footer className="z-20 p-4 bg-gradient-to-t from-black/95 via-black/70 to-transparent flex items-center justify-between gap-3">
+        <div className="text-xs font-bold text-white/90">
+          <span>العمليات المرسلة: </span>
+          <span className="text-emerald-400 font-mono font-black">{scanCount} أصناف</span>
+        </div>
 
-          {/* Clean Dual Mode Buttons: [بيع (افتراضي)] & [استرجاع] */}
-          <div className="grid grid-cols-2 gap-3 p-1.5 rounded-3xl bg-white/10 backdrop-blur-xl border border-white/15">
-            {/* Sale Button (Active by default) */}
-            <button
-              type="button"
-              onClick={() => setMode('sale')}
-              className={`flex items-center justify-center gap-2.5 py-4 rounded-2xl font-black text-sm transition-all duration-200 cursor-pointer active:scale-98 ${
-                mode === 'sale'
-                  ? 'bg-gradient-to-r from-emerald-600 to-emerald-500 text-white shadow-lg shadow-emerald-700/50 scale-[1.02]'
-                  : 'bg-transparent text-gray-300 hover:text-white hover:bg-white/5'
-              }`}
-            >
-              <ShoppingCart className="w-5 h-5 shrink-0" />
-              <div className="text-right">
-                <div className="text-sm font-black leading-tight">بيع (خصم من المخزن)</div>
-                <div className="text-[10px] font-normal opacity-80">ينزل تلقائياً في الفاتورة</div>
-              </div>
-            </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setIsManualInputOpen(true)}
+            className="px-3.5 py-2 rounded-2xl bg-white/15 hover:bg-white/25 backdrop-blur-md text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-colors"
+          >
+            <Keyboard className="w-3.5 h-3.5" />
+            <span>إدخال يدوي</span>
+          </button>
 
-            {/* Return / Restock Button */}
-            <button
-              type="button"
-              onClick={() => setMode('return')}
-              className={`flex items-center justify-center gap-2.5 py-4 rounded-2xl font-black text-sm transition-all duration-200 cursor-pointer active:scale-98 ${
-                mode === 'return'
-                  ? 'bg-gradient-to-r from-amber-600 to-amber-500 text-white shadow-lg shadow-amber-700/50 scale-[1.02]'
-                  : 'bg-transparent text-gray-300 hover:text-white hover:bg-white/5'
-              }`}
-            >
-              <PackagePlus className="w-5 h-5 shrink-0" />
-              <div className="text-right">
-                <div className="text-sm font-black leading-tight">استرجاع (إضافة للمخزن)</div>
-                <div className="text-[10px] font-normal opacity-80">يزيد رصيد السلعة فوراً</div>
-              </div>
-            </button>
-          </div>
+          <button
+            onClick={() => setIsStationModalOpen(true)}
+            className="px-3.5 py-2 rounded-2xl bg-[#2E7D32] hover:bg-[#256628] text-white text-xs font-black flex items-center gap-1.5 cursor-pointer shadow-md transition-all"
+          >
+            <QrCode className="w-3.5 h-3.5" />
+            <span>تبديل الكاشير ({stationId})</span>
+          </button>
         </div>
       </footer>
 
-      {/* Manual Barcode Input Dialog Modal */}
-      {isManualInputOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-xs animate-in fade-in" dir="rtl">
-          <div className="bg-zinc-900 border border-zinc-700 rounded-3xl max-w-sm w-full p-5 space-y-4 text-white shadow-2xl">
+      {/* Station Switcher Modal */}
+      {isStationModalOpen && (
+        <div className="fixed inset-0 z-60 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-in fade-in">
+          <div className="bg-zinc-900 border border-zinc-700 rounded-3xl max-w-sm w-full p-5 space-y-4 shadow-2xl text-right">
             <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
-              <div className="flex items-center gap-2 font-black text-sm">
-                <Keyboard className="w-4 h-4 text-amber-400" />
-                <span>إدخال رقم الباركود يدوياً</span>
+              <div className="flex items-center gap-2 text-white">
+                <Smartphone className="w-5 h-5 text-emerald-400" />
+                <h3 className="font-black text-sm">تبديل محطة الكاشير المربوطة</h3>
               </div>
               <button
+                onClick={() => setIsStationModalOpen(false)}
+                className="text-gray-400 hover:text-white p-1 rounded-lg"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <p className="text-xs text-gray-300 leading-relaxed">
+              اختر محطة الكاشير أو الكمبيوتر الذي تريد إرسال الأصناف إليه فوراً:
+            </p>
+
+            {/* Quick Station Select Chips */}
+            <div className="grid grid-cols-3 gap-2">
+              {['POS-1', 'POS-2', 'POS-3'].map(preset => (
+                <button
+                  key={preset}
+                  onClick={() => handleSelectStation(preset)}
+                  className={`py-2.5 px-2 rounded-xl text-xs font-black transition-all cursor-pointer ${
+                    stationId === preset
+                      ? 'bg-emerald-600 text-white shadow-md border-2 border-emerald-400'
+                      : 'bg-zinc-800 text-gray-300 hover:bg-zinc-700 border border-zinc-700'
+                  }`}
+                >
+                  {preset}
+                </button>
+              ))}
+            </div>
+
+            {/* Custom Station ID input */}
+            <div className="space-y-1.5 pt-2 border-t border-zinc-800">
+              <label className="text-[11px] font-bold text-gray-400">
+                أو اكتب كود المحطة يدويًا:
+              </label>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={stationInput}
+                  onChange={e => setStationInput(e.target.value)}
+                  placeholder="مثال: POS-4 أو كاشير 2"
+                  className="flex-1 px-3 py-2 text-xs rounded-xl bg-zinc-800 border border-zinc-700 text-white font-mono"
+                />
+                <button
+                  onClick={() => handleSelectStation(stationInput)}
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black rounded-xl cursor-pointer"
+                >
+                  ربط
+                </button>
+              </div>
+            </div>
+
+            <div className="p-3 bg-zinc-800/80 rounded-2xl border border-zinc-700 text-[11px] text-gray-300 space-y-1">
+              <div className="font-bold text-emerald-400 flex items-center gap-1">
+                <QrCode className="w-3.5 h-3.5" />
+                <span>الربط الفوري بكاميرا الهاتف:</span>
+              </div>
+              <p className="text-[10px] text-gray-400">
+                يمكنك أيضاً توجيه كاميرا الهاتف نحو رمز QR المعروض في شاشة الكمبيوتر وسيتم الربط تلقائياً!
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Manual Barcode Input Modal */}
+      {isManualInputOpen && (
+        <div className="fixed inset-0 z-60 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-in fade-in">
+          <div className="bg-zinc-900 border border-zinc-700 rounded-3xl max-w-sm w-full p-5 space-y-4 shadow-2xl text-right">
+            <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
+              <h3 className="font-black text-sm text-white flex items-center gap-2">
+                <Keyboard className="w-4 h-4 text-emerald-400" />
+                <span>إدخال الباركود يدوياً</span>
+              </h3>
+              <button
                 onClick={() => setIsManualInputOpen(false)}
-                className="p-1 text-gray-400 hover:text-white rounded-lg cursor-pointer"
+                className="text-gray-400 hover:text-white p-1 rounded-lg"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
             <form onSubmit={handleManualSubmit} className="space-y-3">
-              <div>
-                <label className="text-xs text-gray-300 block mb-1 font-bold">
-                  اكتب رقم الباركود لتنفيذ عملية ({mode === 'sale' ? 'البيع والخصم' : 'الاسترجاع والإضافة'}):
-                </label>
-                <input
-                  type="text"
-                  autoFocus
-                  value={manualBarcode}
-                  onChange={e => setManualBarcode(e.target.value)}
-                  placeholder="مثال: 6221234567890"
-                  className="w-full px-4 py-3 rounded-2xl bg-zinc-800 border border-zinc-700 text-white text-center font-mono font-bold text-sm focus:outline-hidden focus:border-emerald-500"
-                />
-              </div>
+              <input
+                type="text"
+                value={manualBarcode}
+                onChange={e => setManualBarcode(e.target.value)}
+                placeholder="اكتب أرقام الباركود..."
+                autoFocus
+                className="w-full px-3.5 py-2.5 text-xs rounded-xl bg-zinc-800 border border-zinc-700 text-white font-mono text-center tracking-widest text-sm"
+              />
 
-              <div className="flex items-center gap-2">
-                <button
-                  type="submit"
-                  className="flex-1 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs transition-colors cursor-pointer"
-                >
-                  تنفيذ العملية
-                </button>
+              <div className="flex justify-end gap-2">
                 <button
                   type="button"
                   onClick={() => setIsManualInputOpen(false)}
-                  className="py-3 px-4 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-gray-300 font-bold text-xs transition-colors cursor-pointer"
+                  className="px-4 py-2 text-xs font-bold text-gray-400 hover:text-white"
                 >
                   إلغاء
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black rounded-xl shadow-md cursor-pointer"
+                >
+                  إرسال للفاتورة
                 </button>
               </div>
             </form>
           </div>
         </div>
       )}
-
-      {/* Laser Animation Keyframe Style */}
-      <style>{`
-        @keyframes scanLaser {
-          0% {
-            top: 5%;
-          }
-          100% {
-            top: 95%;
-          }
-        }
-      `}</style>
     </div>
   );
 };

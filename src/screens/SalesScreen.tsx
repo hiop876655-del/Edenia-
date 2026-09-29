@@ -21,6 +21,7 @@ import {
 import { db } from '../services/db';
 import { Product, Customer, Sale, SaleItem, AppSettings } from '../types';
 import { SmartVoidModal } from '../components/SmartVoidModal';
+import { StationPairingCard } from '../components/StationPairingCard';
 
 interface SalesScreenProps {
   onShowReceipt: (sale: Sale) => void;
@@ -32,6 +33,16 @@ export const SalesScreen: React.FC<SalesScreenProps> = ({ onShowReceipt }) => {
   const [settings, setSettings] = useState<AppSettings>(db.getSettings());
   const [salesHistory, setSalesHistory] = useState<Sale[]>([]);
   const [saleToVoid, setSaleToVoid] = useState<Sale | null>(null);
+
+  // POS Station ID (e.g. POS-1, POS-2) for dedicated phone camera pairing
+  const [stationId, setStationId] = useState<string>(() => {
+    return localStorage.getItem('idenia_pos_station_id') || 'POS-1';
+  });
+
+  const handleStationChange = (newStationId: string) => {
+    setStationId(newStationId);
+    localStorage.setItem('idenia_pos_station_id', newStationId);
+  };
 
   // Active Cart State
   const [cart, setCart] = useState<SaleItem[]>([]);
@@ -682,6 +693,21 @@ export const SalesScreen: React.FC<SalesScreenProps> = ({ onShowReceipt }) => {
                 <span>حفظ وطباعة الفاتورة الحرارية</span>
               </button>
             </div>
+
+            {/* Dedicated Station Barcode Phone Pairing Box */}
+            <StationPairingCard
+              stationId={stationId}
+              onStationIdChange={handleStationChange}
+              merchantPhone={db.getUser()?.phone || ''}
+              onBarcodeReceived={(barcode, mode) => {
+                if (mode === 'sale') {
+                  handleBarcodeDetected(barcode);
+                } else {
+                  // Return mode
+                  handleBarcodeDetected(barcode);
+                }
+              }}
+            />
           </div>
         </div>
       ) : (
