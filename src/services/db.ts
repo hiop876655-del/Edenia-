@@ -1,4 +1,5 @@
 import { saveEncryptedItem, loadEncryptedItem } from "./cryptoStorage";
+import { normalizePhone } from "./phoneUtils";
 import {
   Product,
   Sale,
@@ -49,7 +50,7 @@ class LocalDatabase {
     }
     const phone = explicitPhone || loadEncryptedItem<UserAccount | null>(STORAGE_KEYS.USER, null)?.phone;
     if (phone) {
-      const cleanPhone = phone.replace(/[^0-9]/g, '');
+      const cleanPhone = normalizePhone(phone);
       if (cleanPhone) {
         return `${baseKey}_${cleanPhone}`;
       }

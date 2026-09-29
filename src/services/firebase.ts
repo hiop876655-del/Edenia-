@@ -20,6 +20,7 @@ import {
 import config from '../../firebase-applet-config.json';
 import { checkRealInternetConnection } from './network';
 import { getDeviceId } from './device';
+import { normalizePhone } from './phoneUtils';
 
 // Initialize Firebase App
 const app = getApps().length === 0 ? initializeApp({
@@ -658,7 +659,7 @@ export async function getMerchantCloudConfigFromFirebase(phone: string): Promise
 
 // 14.1. Save Merchant Full Data Snapshot & Live Real-Time Sync to Central Cloud (Instant Cross-Device Sync)
 export async function saveMerchantDataSnapshotInFirebase(phone: string, snapshot: any) {
-  const cleanPhone = phone.replace(/[^0-9]/g, '');
+  const cleanPhone = normalizePhone(phone);
   if (!cleanPhone || !snapshot) return { success: false };
 
   try {
@@ -689,7 +690,7 @@ export async function saveMerchantDataSnapshotInFirebase(phone: string, snapshot
 
 // 14.2. Get Merchant Full Data Snapshot from Central Cloud
 export async function getMerchantDataSnapshotFromFirebase(phone: string): Promise<any | null> {
-  const cleanPhone = phone.replace(/[^0-9]/g, '');
+  const cleanPhone = normalizePhone(phone);
   if (!cleanPhone) return null;
 
   try {
@@ -717,7 +718,7 @@ export function subscribeToMerchantDataSnapshotInFirebase(
   phone: string,
   onRemoteUpdate: (payload: { data: any; updatedAt: number; updatedByDeviceId?: string }) => void
 ): () => void {
-  const cleanPhone = phone.replace(/[^0-9]/g, '');
+  const cleanPhone = normalizePhone(phone);
   if (!cleanPhone) return () => {};
 
   try {

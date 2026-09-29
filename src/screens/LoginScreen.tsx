@@ -12,6 +12,7 @@ import {
 import { api } from '../services/api';
 import { db } from '../services/db';
 import { cloudDatabaseService } from '../services/cloudDatabase';
+import { normalizePhone } from '../services/phoneUtils';
 import { UserAccount } from '../types';
 
 interface LoginScreenProps {
@@ -37,7 +38,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
     e.preventDefault();
     setError(null);
 
-    const cleanPhone = phone.trim();
+    const cleanPhone = normalizePhone(phone);
 
     if (!cleanPhone) {
       setError('يرجى إدخال رقم الهاتف.');

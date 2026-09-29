@@ -16,6 +16,7 @@ import {
 import { TRADE_CATEGORIES } from '../data/tradeCategories';
 import { api } from '../services/api';
 import { db } from '../services/db';
+import { normalizePhone } from '../services/phoneUtils';
 import { UserAccount } from '../types';
 
 interface RegisterScreenProps {
@@ -103,7 +104,7 @@ export const RegisterScreen: React.FC<RegisterScreenProps> = ({
       const res = await api.register({
         fullName: fullName.trim(),
         shopName: shopName.trim(),
-        phone: phone.trim(),
+        phone: normalizePhone(phone),
         password: password,
         tradeType: finalTradeName,
         customTrade: customTrade.trim(),

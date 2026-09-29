@@ -1,5 +1,5 @@
-// Dedicated Merchant Cloud Database Service (BYOD)
-// Connects merchant to their personal Supabase / REST cloud database with cross-device sync
+// Dedicated Merchant Cloud Database Service (BYOD & Central Cloud)
+// Connects merchant to their personal Supabase / REST cloud database and central live database with cross-device sync
 
 import { MerchantCloudConfig, DatabaseTutorialSettings } from '../types';
 import {
@@ -13,6 +13,7 @@ import {
 } from './firebase';
 import { db } from './db';
 import { checkRealInternetConnection } from './network';
+import { normalizePhone } from './phoneUtils';
 
 const LOCAL_CLOUD_CONFIG_KEY = 'idenia_merchant_cloud_config';
 
@@ -96,7 +97,7 @@ export const cloudDatabaseService = {
       // Supabase REST endpoints return 200, 404, or openapi schema
       // 401 or 403 explicitly means invalid key or project paused
       if (response.status === 401 || response.status === 403) {
-        throw new Error('المفتاح السحابي (Anon Key / API Key) غير صحيح أو المشروع متوقف. تأكد من نسخ المفتاح الصحيح من صفحة Project Settings > API في Supabase (عادة يكون المفتاح الطويل jwt يبدأ بـ eyJhbGci...).');
+        throw new Error('المفتاح السحابي (Anon Key / API Key) غير صحيح أو المشروع متوقف. تأكد من نسخ المفتاح الصحيح من صفحة Project Settings > API في Supabase.');
       }
 
       return {
@@ -123,6 +124,7 @@ export const cloudDatabaseService = {
     shopName?: string;
   }): Promise<{ success: boolean; config: MerchantCloudConfig }> {
     const { phone, projectUrl, apiKey, shopName } = params;
+    const cleanPhone = normalizePhone(phone);
 
     // Test connection first
     await this.testConnection(projectUrl, apiKey);
@@ -139,7 +141,7 @@ export const cloudDatabaseService = {
       isConnected: true,
       connectedAt: Date.now(),
       lastSyncedAt: Date.now(),
-      merchantPhone: phone,
+      merchantPhone: cleanPhone,
       merchantShopName: shopName
     };
 
@@ -148,7 +150,7 @@ export const cloudDatabaseService = {
 
     // 2. Save in Firebase linked to phone number for cross-device roaming
     try {
-      await saveMerchantCloudConfigInFirebase(phone, config);
+      await saveMerchantCloudConfigInFirebase(cleanPhone, config);
     } catch (err) {
       console.warn('Cloud sync error for config in Firebase:', err);
     }
@@ -159,11 +161,28 @@ export const cloudDatabaseService = {
     return { success: true, config };
   },
 
-  // 6. Restore Merchant Cloud Database on New Device Login
+  // 6. Restore Merchant Cloud Database on New Device Login / Incognito
   async restoreMerchantDatabaseForDevice(phone: string): Promise<MerchantCloudConfig | null> {
+    const cleanPhone = normalizePhone(phone);
+    if (!cleanPhone) return null;
+
     try {
-      // 1. Fetch config from central Firebase database
-      const cloudRecord = await getMerchantCloudConfigFromFirebase(phone);
+      // 1. Fetch latest data snapshot from cloud immediately to ensure 100% up to date state
+      const snapshot = await getMerchantDataSnapshotFromFirebase(cleanPhone);
+      if (snapshot && (
+        (Array.isArray(snapshot.products) && snapshot.products.length > 0) ||
+        (Array.isArray(snapshot.sales) && snapshot.sales.length > 0) ||
+        (Array.isArray(snapshot.customers) && snapshot.customers.length > 0) ||
+        (Array.isArray(snapshot.debts) && snapshot.debts.length > 0)
+      )) {
+        db.restoreStoreData(snapshot);
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('idenia_db_changed', { detail: { timestamp: Date.now(), fromCloudRestore: true } }));
+        }
+      }
+
+      // 2. Fetch config from central Firebase database
+      const cloudRecord = await getMerchantCloudConfigFromFirebase(cleanPhone);
       if (cloudRecord && cloudRecord.isConnected && cloudRecord.projectUrl && cloudRecord.apiKey) {
         const config: MerchantCloudConfig = {
           provider: cloudRecord.provider || 'supabase',
@@ -172,20 +191,38 @@ export const cloudDatabaseService = {
           isConnected: true,
           connectedAt: cloudRecord.connectedAt || Date.now(),
           lastSyncedAt: cloudRecord.lastSyncedAt || Date.now(),
-          merchantPhone: phone,
+          merchantPhone: cleanPhone,
           merchantShopName: cloudRecord.merchantShopName
         };
 
         this.saveLocalConfig(config);
 
-        // 2. Check if local store data is empty (Device is newly opened/empty)
-        const currentProducts = db.getProducts();
-        const currentSales = db.getSales();
-        if (currentProducts.length === 0 && currentSales.length === 0) {
-          const snapshot = await getMerchantDataSnapshotFromFirebase(phone);
-          if (snapshot) {
-            db.restoreStoreData(snapshot);
+        // Try to fetch store data from Supabase REST endpoint if available
+        try {
+          const baseUrl = config.projectUrl.replace(/\/+$/, '');
+          const supabaseFetchUrl = `${baseUrl}/rest/v1/spopos_store_data?phone=eq.${cleanPhone}&select=*`;
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 4000);
+          const sRes = await fetch(supabaseFetchUrl, {
+            headers: {
+              'apikey': config.apiKey,
+              'Authorization': `Bearer ${config.apiKey}`,
+              'Accept': 'application/json'
+            },
+            signal: controller.signal
+          });
+          clearTimeout(timeoutId);
+          if (sRes.ok) {
+            const rows = await sRes.json();
+            if (Array.isArray(rows) && rows.length > 0 && rows[0].data) {
+              db.restoreStoreData(rows[0].data);
+              if (typeof window !== 'undefined') {
+                window.dispatchEvent(new CustomEvent('idenia_db_changed', { detail: { timestamp: Date.now(), fromSupabaseRestore: true } }));
+              }
+            }
           }
+        } catch {
+          // Non-blocking fallback
         }
 
         return config;
@@ -193,7 +230,7 @@ export const cloudDatabaseService = {
 
       // Check local storage as fallback
       const local = this.getLocalConfig();
-      if (local && local.isConnected && local.merchantPhone === phone) {
+      if (local && local.isConnected && normalizePhone(local.merchantPhone || '') === cleanPhone) {
         return local;
       }
     } catch (err) {
@@ -202,11 +239,11 @@ export const cloudDatabaseService = {
     return null;
   },
 
-  // 7. Sync All Local Data to Central Cloud & Merchant DB (Instant Live Broadcast)
+  // 7. Sync All Local Data to Central Cloud & Merchant DB (Instant Live Broadcast & Multi-Device Protection)
   async syncAllDataToCloud(config?: MerchantCloudConfig | null): Promise<boolean> {
     const activeConfig = config || this.getLocalConfig();
     const currentUser = db.getUser();
-    const targetPhone = activeConfig?.merchantPhone || currentUser?.phone;
+    const targetPhone = normalizePhone(activeConfig?.merchantPhone || currentUser?.phone || '');
 
     if (!targetPhone) return false;
     if (typeof navigator !== 'undefined' && navigator.onLine === false) return false;
@@ -220,6 +257,23 @@ export const cloudDatabaseService = {
       const debtPayments = db.getDebtPayments();
       const stockMovements = db.getStockMovements();
       const settings = db.getSettings();
+
+      // Guard against blank/new devices accidentally wiping cloud data
+      if (products.length === 0 && sales.length === 0 && customers.length === 0 && debts.length === 0) {
+        const cloudSnap = await getMerchantDataSnapshotFromFirebase(targetPhone);
+        if (cloudSnap && (
+          (Array.isArray(cloudSnap.products) && cloudSnap.products.length > 0) ||
+          (Array.isArray(cloudSnap.sales) && cloudSnap.sales.length > 0) ||
+          (Array.isArray(cloudSnap.customers) && cloudSnap.customers.length > 0)
+        )) {
+          // Cloud has real store data; restore it to this device instead of wiping!
+          db.restoreStoreData(cloudSnap);
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('idenia_db_changed', { detail: { timestamp: Date.now(), fromCloudGuard: true } }));
+          }
+          return true;
+        }
+      }
 
       const snapshotPayload = {
         updatedAt: new Date().toISOString(),
@@ -238,11 +292,30 @@ export const cloudDatabaseService = {
       // 1. Save snapshot to central live stream Firestore channel for merchant phone
       saveMerchantDataSnapshotInFirebase(targetPhone, snapshotPayload).catch(() => {});
 
-      // 2. Record timestamp if custom config exists
-      if (activeConfig) {
+      // 2. If merchant has Supabase / custom database connected, push to Supabase REST as well
+      if (activeConfig && activeConfig.isConnected && activeConfig.projectUrl && activeConfig.apiKey) {
+        const baseUrl = activeConfig.projectUrl.replace(/\/+$/, '');
+        const supabaseUpsertUrl = `${baseUrl}/rest/v1/spopos_store_data`;
+        fetch(supabaseUpsertUrl, {
+          method: 'POST',
+          headers: {
+            'apikey': activeConfig.apiKey,
+            'Authorization': `Bearer ${activeConfig.apiKey}`,
+            'Content-Type': 'application/json',
+            'Prefer': 'resolution=merge-duplicates'
+          },
+          body: JSON.stringify({
+            phone: targetPhone,
+            shop_name: snapshotPayload.shopName,
+            data: snapshotPayload,
+            updated_at: new Date().toISOString()
+          })
+        }).catch(() => {});
+
         activeConfig.lastSyncedAt = Date.now();
         this.saveLocalConfig(activeConfig);
       }
+
       return true;
     } catch (err) {
       console.warn('Sync error:', err);
