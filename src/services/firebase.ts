@@ -858,7 +858,7 @@ export async function getDatabaseTutorialSettingsFromFirebase(): Promise<Databas
 export async function sendStationBarcodeScanInFirebase(
   phone: string,
   stationId: string,
-  scanData: { barcode: string; mode: 'sale' | 'return'; productName?: string }
+  scanData: { barcode: string; mode: 'sale' | 'return'; productName?: string; nonce?: string }
 ) {
   const cleanPhone = phone.replace(/[^0-9]/g, '');
   const cleanStation = (stationId || 'POS-1').trim().toUpperCase();

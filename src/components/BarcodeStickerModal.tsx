@@ -1,5 +1,5 @@
-import React, { useState, useRef } from 'react';
-import { X, Printer, Barcode as BarcodeIcon, Check, Layers, LayoutGrid, FileText } from 'lucide-react';
+import React, { useState } from 'react';
+import { X, Printer, Barcode as BarcodeIcon, Check, Layers, LayoutGrid, FileText, Eye, EyeOff } from 'lucide-react';
 import { Product, AppSettings } from '../types';
 
 interface BarcodeStickerModalProps {
@@ -30,7 +30,7 @@ const EAN_G = ['0100111', '0110011', '0011011', '0100001', '0011101', '0111001',
 const EAN_R = ['1110010', '1100110', '1101100', '1000010', '1011100', '1001110', '1010000', '1000100', '1001000', '1110100'];
 const EAN_PARITY = ['LLLLLL', 'LLGLGG', 'LLGGLG', 'LLGGGL', 'LGLLGG', 'LGGLLG', 'LGGGLL', 'LGLGLG', 'LGLGGL', 'LGGLGL'];
 
-// Authentic scanner-readable Barcode SVG generator (EAN-13 & Code 128) with optimized line density
+// Authentic scanner-readable Barcode SVG generator (EAN-13 & Code 128) with compact mini label lines
 function generateBarcodeSvg(code: string): string {
   const clean = (code || '2000000000000').trim();
 
@@ -60,8 +60,8 @@ function generateBarcodeSvg(code: string): string {
     bits += '101';     // Right Guard
     bits += '0000000'; // Quiet zone right
 
-    const moduleWidth = 1.8;
-    const height = 38;
+    const moduleWidth = 1.4;
+    const height = 28;
     const totalWidth = bits.length * moduleWidth;
 
     let rects = '';
@@ -72,7 +72,7 @@ function generateBarcodeSvg(code: string): string {
       }
     }
 
-    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${totalWidth} ${height}" class="w-full h-9" preserveAspectRatio="none">
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${totalWidth} ${height}" class="w-full h-6" preserveAspectRatio="none">
       ${rects}
     </svg>`;
   }
@@ -108,8 +108,8 @@ function generateBarcodeSvg(code: string): string {
   }
   bits += '0000000000';
 
-  const moduleWidth = 1.6;
-  const height = 38;
+  const moduleWidth = 1.3;
+  const height = 28;
   const totalWidth = bits.length * moduleWidth;
 
   let rects = '';
@@ -120,7 +120,7 @@ function generateBarcodeSvg(code: string): string {
     }
   }
 
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${totalWidth} ${height}" class="w-full h-9" preserveAspectRatio="none">
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${totalWidth} ${height}" class="w-full h-6" preserveAspectRatio="none">
     ${rects}
   </svg>`;
 }
@@ -133,6 +133,9 @@ function formatBarcodeText(code: string): string {
   return clean ? `#${clean}` : '#00000';
 }
 
+// A4 Capacity Constant for Compact Mini Stickers (5 cols x 13 rows)
+const STICKERS_PER_A4_PAGE = 65;
+
 export const BarcodeStickerModal: React.FC<BarcodeStickerModalProps> = ({
   product,
   settings,
@@ -141,8 +144,12 @@ export const BarcodeStickerModal: React.FC<BarcodeStickerModalProps> = ({
 }) => {
   const [quantity, setQuantity] = useState<number>(10);
   const [paperMode, setPaperMode] = useState<'sheet' | 'roll'>('sheet');
+  const [showPrice, setShowPrice] = useState<boolean>(true);
+  const [showShopName, setShowShopName] = useState<boolean>(true);
 
   if (!isOpen || !product) return null;
+
+  const totalPages = paperMode === 'sheet' ? Math.ceil(quantity / STICKERS_PER_A4_PAGE) : 1;
 
   const handlePrint = () => {
     const printWindow = window.open('', '', 'width=900,height=700');
@@ -158,17 +165,25 @@ export const BarcodeStickerModal: React.FC<BarcodeStickerModalProps> = ({
     const priceText = `${product.selling_price.toFixed(2)} ${settings.currency_symbol}`;
 
     if (paperMode === 'sheet') {
-      // A4 Sheet Multi-Grid Print Layout (4 columns x N rows)
+      // Chunk quantity into A4 pages (65 stickers per page max)
+      const pageChunks: number[] = [];
+      let remainingQty = quantity;
+      while (remainingQty > 0) {
+        const countForThisPage = Math.min(remainingQty, STICKERS_PER_A4_PAGE);
+        pageChunks.push(countForThisPage);
+        remainingQty -= countForThisPage;
+      }
+
       printWindow.document.write(`
         <!DOCTYPE html>
         <html dir="rtl" lang="ar">
           <head>
             <meta charset="utf-8" />
-            <title>طباعة ملصقات الباركود (${quantity}) - ${productName}</title>
+            <title>طباعة ملصقات الباركود المصغرة (${quantity}) - ${productName}</title>
             <style>
               @page {
                 size: A4 portrait;
-                margin: 8mm;
+                margin: 0;
               }
               body {
                 font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
@@ -178,56 +193,60 @@ export const BarcodeStickerModal: React.FC<BarcodeStickerModalProps> = ({
                 color: #000;
                 -webkit-print-color-adjust: exact;
               }
-              .grid-container {
-                display: grid;
-                grid-template-columns: repeat(4, 1fr);
-                gap: 4mm 3mm;
-                width: 100%;
+              .a4-page {
+                width: 210mm;
+                height: 297mm;
+                padding: 5mm 4mm;
                 box-sizing: border-box;
+                display: grid;
+                grid-template-columns: repeat(5, 1fr);
+                gap: 2mm 1.5mm;
+                page-break-after: always;
+                break-after: page;
+                align-content: start;
+                overflow: hidden;
               }
               .sticker-card {
-                border: 1px dashed #666;
-                border-radius: 4px;
-                padding: 3px 2px;
+                border: 0.8px dashed #888;
+                border-radius: 3px;
+                padding: 2px 1.5px;
                 text-align: center;
                 display: flex;
                 flex-direction: column;
                 justify-content: space-between;
                 align-items: center;
-                height: 27mm;
+                height: 20mm;
                 box-sizing: border-box;
-                page-break-inside: avoid;
-                break-inside: avoid;
                 overflow: hidden;
                 background: #fff;
               }
               .shop-name {
-                font-size: 7.5pt;
+                font-size: 6.5pt;
                 font-weight: 700;
                 color: #444;
-                line-height: 1.1;
+                line-height: 1;
                 max-width: 100%;
                 white-space: nowrap;
                 overflow: hidden;
                 text-overflow: ellipsis;
               }
               .product-name {
-                font-size: 8.5pt;
+                font-size: 7.5pt;
                 font-weight: 900;
                 color: #000;
-                line-height: 1.1;
+                line-height: 1;
                 max-width: 100%;
                 white-space: nowrap;
                 overflow: hidden;
                 text-overflow: ellipsis;
               }
               .barcode-box {
-                width: 92%;
-                height: 22px;
+                width: 95%;
+                height: 16px;
                 display: flex;
                 justify-content: center;
                 align-items: center;
-                margin: 1px 0;
+                margin: 0.5px 0;
               }
               .barcode-box svg {
                 width: 100%;
@@ -235,32 +254,33 @@ export const BarcodeStickerModal: React.FC<BarcodeStickerModalProps> = ({
               }
               .barcode-text {
                 font-family: monospace;
-                font-size: 7.5pt;
+                font-size: 6.5pt;
                 font-weight: 900;
-                letter-spacing: 1.5px;
+                letter-spacing: 1px;
                 line-height: 1;
               }
               .price-tag {
-                font-size: 8.5pt;
+                font-size: 7.5pt;
                 font-weight: 900;
                 color: #000;
                 line-height: 1;
-                margin-top: 1px;
               }
             </style>
           </head>
           <body>
-            <div class="grid-container">
-              ${Array.from({ length: quantity }).map(() => `
-                <div class="sticker-card">
-                  <div class="shop-name">${shopTitle}</div>
-                  <div class="product-name">${productName}</div>
-                  <div class="barcode-box">${barcodeSvg}</div>
-                  <div class="barcode-text">${barcodeText}</div>
-                  <div class="price-tag">${priceText}</div>
-                </div>
-              `).join('')}
-            </div>
+            ${pageChunks.map((chunkSize) => `
+              <div class="a4-page">
+                ${Array.from({ length: chunkSize }).map(() => `
+                  <div class="sticker-card">
+                    ${showShopName ? `<div class="shop-name">${shopTitle}</div>` : ''}
+                    <div class="product-name">${productName}</div>
+                    <div class="barcode-box">${barcodeSvg}</div>
+                    <div class="barcode-text">${barcodeText}</div>
+                    ${showPrice ? `<div class="price-tag">${priceText}</div>` : ''}
+                  </div>
+                `).join('')}
+              </div>
+            `).join('')}
             <script>
               window.onload = function() {
                 window.print();
@@ -271,16 +291,16 @@ export const BarcodeStickerModal: React.FC<BarcodeStickerModalProps> = ({
         </html>
       `);
     } else {
-      // Single Label Thermal Roll (50mm x 30mm)
+      // Single Label Thermal Roll (Compact Mini Roll)
       printWindow.document.write(`
         <!DOCTYPE html>
         <html dir="rtl" lang="ar">
           <head>
             <meta charset="utf-8" />
-            <title>رول باركود حراري (${quantity}) - ${productName}</title>
+            <title>رول باركود حراري مصغر (${quantity}) - ${productName}</title>
             <style>
               @page {
-                size: 50mm 30mm;
+                size: 38mm 22mm;
                 margin: 0;
               }
               body {
@@ -292,9 +312,9 @@ export const BarcodeStickerModal: React.FC<BarcodeStickerModalProps> = ({
                 -webkit-print-color-adjust: exact;
               }
               .sticker-card {
-                width: 50mm;
-                height: 30mm;
-                padding: 3px;
+                width: 38mm;
+                height: 22mm;
+                padding: 2px;
                 box-sizing: border-box;
                 display: flex;
                 flex-direction: column;
@@ -305,44 +325,48 @@ export const BarcodeStickerModal: React.FC<BarcodeStickerModalProps> = ({
                 break-after: page;
               }
               .shop-name {
-                font-size: 8px;
+                font-size: 6.5pt;
                 font-weight: 700;
                 color: #333;
+                line-height: 1;
               }
               .product-name {
-                font-size: 9.5px;
+                font-size: 7.5pt;
                 font-weight: 900;
-                max-height: 13px;
+                max-height: 10px;
                 overflow: hidden;
                 white-space: nowrap;
                 text-overflow: ellipsis;
                 width: 100%;
+                line-height: 1;
               }
               .price {
-                font-size: 10.5px;
+                font-size: 8pt;
                 font-weight: 900;
                 color: #000;
+                line-height: 1;
               }
               .barcode-svg {
-                width: 90%;
-                height: 24px;
+                width: 95%;
+                height: 18px;
               }
               .barcode-text {
                 font-family: monospace;
-                font-size: 9px;
+                font-size: 7pt;
                 font-weight: 900;
-                letter-spacing: 1.5px;
+                letter-spacing: 1px;
+                line-height: 1;
               }
             </style>
           </head>
           <body>
             ${Array.from({ length: quantity }).map(() => `
               <div class="sticker-card">
-                <div class="shop-name">${shopTitle}</div>
+                ${showShopName ? `<div class="shop-name">${shopTitle}</div>` : ''}
                 <div class="product-name">${productName}</div>
                 <div class="barcode-svg">${barcodeSvg}</div>
                 <div class="barcode-text">${barcodeText}</div>
-                <div class="price">${priceText}</div>
+                ${showPrice ? `<div class="price">${priceText}</div>` : ''}
               </div>
             `).join('')}
             <script>
@@ -359,7 +383,7 @@ export const BarcodeStickerModal: React.FC<BarcodeStickerModalProps> = ({
   };
 
   const setQtySafely = (val: number) => {
-    const clamped = Math.max(1, Math.min(100, val));
+    const clamped = Math.max(1, Math.min(500, val));
     setQuantity(clamped);
   };
 
@@ -374,16 +398,16 @@ export const BarcodeStickerModal: React.FC<BarcodeStickerModalProps> = ({
             </div>
             <div>
               <h3 className="font-black text-sm md:text-base text-gray-900 dark:text-white">
-                طباعة ملصقات الباركود للمنتج
+                طباعة ملصقات الباركود المصغرة
               </h3>
               <p className="text-[11px] text-gray-500 dark:text-gray-400 font-medium">
-                تحديد العدد وتصميم الورقة وتوفير الورق
+                حجم مصغر دقيق للأقلام والأكياس والمنتجات الصغيرة والكبيرة
               </p>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="text-gray-400 hover:text-gray-600 dark:hover:text-white p-1 rounded-xl transition-colors"
+            className="text-gray-400 hover:text-gray-600 dark:hover:text-white p-1 rounded-xl transition-colors cursor-pointer"
           >
             <X className="w-5 h-5" />
           </button>
@@ -399,65 +423,108 @@ export const BarcodeStickerModal: React.FC<BarcodeStickerModalProps> = ({
             <button
               type="button"
               onClick={() => setPaperMode('sheet')}
-              className={`py-2 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 ${
+              className={`py-2 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 cursor-pointer ${
                 paperMode === 'sheet'
                   ? 'bg-white dark:bg-zinc-800 text-[#2E7D32] dark:text-[#66BB6A] shadow-xs font-black'
                   : 'text-gray-500 hover:text-gray-800 dark:text-gray-400'
               }`}
             >
               <FileText className="w-4 h-4" />
-              <span>ورقة A4 / شيت متعدد</span>
+              <span>ورق A4 (65 ملصق/ورقة)</span>
             </button>
             <button
               type="button"
               onClick={() => setPaperMode('roll')}
-              className={`py-2 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 ${
+              className={`py-2 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 cursor-pointer ${
                 paperMode === 'roll'
                   ? 'bg-white dark:bg-zinc-800 text-[#2E7D32] dark:text-[#66BB6A] shadow-xs font-black'
                   : 'text-gray-500 hover:text-gray-800 dark:text-gray-400'
               }`}
             >
               <Layers className="w-4 h-4" />
-              <span>رول حراري (50×30 مم)</span>
+              <span>رول حراري مصغر (38×22)</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Print Content Customization Toggles (Show/Hide Price & Store Name) */}
+        <div className="p-3 bg-gray-50 dark:bg-zinc-900 rounded-2xl border border-gray-200 dark:border-gray-800 space-y-2">
+          <span className="text-xs font-extrabold text-gray-800 dark:text-gray-200 block">
+            خيارات المظهر على الملصق:
+          </span>
+          <div className="grid grid-cols-2 gap-2">
+            {/* Toggle Price */}
+            <button
+              type="button"
+              onClick={() => setShowPrice(!showPrice)}
+              className={`py-2 px-3 rounded-xl text-xs font-bold flex items-center justify-between transition-all cursor-pointer border ${
+                showPrice
+                  ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-300 dark:border-emerald-800 text-[#2E7D32] dark:text-[#66BB6A]'
+                  : 'bg-white dark:bg-zinc-800 border-gray-200 dark:border-gray-700 text-gray-400'
+              }`}
+            >
+              <div className="flex items-center gap-1.5">
+                {showPrice ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+                <span>سعر المنتج</span>
+              </div>
+              <span className="text-[10px] font-black">{showPrice ? 'مُفعّل' : 'مخفي'}</span>
+            </button>
+
+            {/* Toggle Store Name */}
+            <button
+              type="button"
+              onClick={() => setShowShopName(!showShopName)}
+              className={`py-2 px-3 rounded-xl text-xs font-bold flex items-center justify-between transition-all cursor-pointer border ${
+                showShopName
+                  ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-300 dark:border-emerald-800 text-[#2E7D32] dark:text-[#66BB6A]'
+                  : 'bg-white dark:bg-zinc-800 border-gray-200 dark:border-gray-700 text-gray-400'
+              }`}
+            >
+              <div className="flex items-center gap-1.5">
+                {showShopName ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+                <span>اسم المحل</span>
+              </div>
+              <span className="text-[10px] font-black">{showShopName ? 'مُفعّل' : 'مخفي'}</span>
             </button>
           </div>
         </div>
 
         {/* Quantity Selector */}
-        <div className="space-y-2 bg-emerald-50/50 dark:bg-emerald-950/20 p-3.5 rounded-2xl border border-emerald-100 dark:border-emerald-900/40">
+        <div className="space-y-2.5 bg-emerald-50/60 dark:bg-emerald-950/20 p-3.5 rounded-2xl border border-emerald-100 dark:border-emerald-900/40">
           <div className="flex items-center justify-between">
             <label className="text-xs font-bold text-gray-800 dark:text-gray-200 flex items-center gap-1.5">
-              <span>كم عدد الملصقات المطلوب طباعتها؟</span>
+              <span>عدد الملصقات المطلوب طباعتها:</span>
             </label>
             <span className="text-xs font-black text-[#2E7D32] dark:text-[#66BB6A]">
               {quantity} {quantity === 1 ? 'ملصق' : 'ملصقات'}
+              {paperMode === 'sheet' && ` (${totalPages} ${totalPages === 1 ? 'ورقة A4' : 'صفحات A4'})`}
             </span>
           </div>
 
           {/* Quick Buttons */}
           <div className="flex items-center gap-1.5 flex-wrap">
-            {[1, 5, 10, 20, 30, 40].map((num) => (
+            {[10, 30, 65, 130].map((num) => (
               <button
                 key={num}
                 type="button"
                 onClick={() => setQtySafely(num)}
-                className={`py-1.5 px-3 rounded-xl text-xs font-bold transition-all ${
+                className={`py-1.5 px-3 rounded-xl text-xs font-bold transition-all cursor-pointer ${
                   quantity === num
                     ? 'bg-[#2E7D32] text-white shadow-xs scale-105'
                     : 'bg-white dark:bg-zinc-800 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-700 hover:border-emerald-500'
                 }`}
               >
-                {num}
+                {num === 65 ? '65 (ورقة)' : num === 130 ? '130 (ورقتين)' : `${num} ملصق`}
               </button>
             ))}
 
             {/* Custom Input */}
             <div className="flex items-center gap-1 mr-auto">
-              <span className="text-[11px] text-gray-500 font-bold">عدد مخصص:</span>
+              <span className="text-[11px] text-gray-500 font-bold">مخصص:</span>
               <input
                 type="number"
                 min={1}
-                max={100}
+                max={500}
                 value={quantity}
                 onChange={(e) => setQtySafely(parseInt(e.target.value, 10) || 1)}
                 className="w-16 py-1 px-2 text-center text-xs font-black border border-gray-300 dark:border-gray-700 bg-white dark:bg-zinc-900 rounded-xl text-gray-900 dark:text-white focus:outline-hidden focus:ring-2 focus:ring-[#2E7D32]"
@@ -466,71 +533,79 @@ export const BarcodeStickerModal: React.FC<BarcodeStickerModalProps> = ({
           </div>
         </div>
 
-        {/* Interactive Sticker Preview */}
+        {/* Interactive Compact Sticker Preview */}
         <div className="p-3 bg-gray-50 dark:bg-zinc-900 rounded-2xl flex flex-col items-center justify-center space-y-2">
           <div className="flex items-center justify-between w-full text-[11px] text-gray-500 dark:text-gray-400 font-bold px-1">
-            <span>معاينة ورقة الطباعة ({paperMode === 'sheet' ? 'ورق A4 متعدد' : 'رول حراري'}):</span>
+            <span>معاينة المقاس المصغر الحقيقي (Mini Label):</span>
             <span className="text-[#2E7D32] dark:text-[#66BB6A] font-black">
-              الحجم موحد ومضبوط تلقائياً
+              مناسب للأقلام والعلب الصغيرة
             </span>
           </div>
 
           {paperMode === 'sheet' ? (
-            /* Mini A4 Grid Preview */
-            <div className="w-full bg-white dark:bg-zinc-950 p-3 rounded-xl border border-gray-300 dark:border-gray-800 shadow-inner max-h-56 overflow-y-auto">
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
-                {Array.from({ length: Math.min(quantity, 12) }).map((_, idx) => (
+            /* Mini A4 Grid Preview (5 cols x N rows) */
+            <div className="w-full bg-white dark:bg-zinc-950 p-2.5 rounded-xl border border-gray-300 dark:border-gray-800 shadow-inner max-h-52 overflow-y-auto">
+              <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-1.5">
+                {Array.from({ length: Math.min(quantity, 15) }).map((_, idx) => (
                   <div
                     key={idx}
-                    className="p-1.5 bg-white text-black rounded-lg border border-dashed border-gray-300 flex flex-col items-center justify-center text-center space-y-0.5 shadow-2xs"
+                    className="p-1 bg-white text-black rounded-md border border-dashed border-gray-300 flex flex-col items-center justify-between text-center h-[52px] shadow-2xs"
                   >
-                    <div className="text-[8px] font-bold text-gray-600 truncate max-w-full">
-                      {settings.shop_name || 'ايدينيا - حِسبة'}
-                    </div>
-                    <div className="text-[9px] font-black text-gray-900 truncate max-w-full">
+                    {showShopName && (
+                      <div className="text-[7px] font-bold text-gray-600 truncate max-w-full leading-tight">
+                        {settings.shop_name || 'ايدينيا - حِسبة'}
+                      </div>
+                    )}
+                    <div className="text-[8px] font-black text-gray-900 truncate max-w-full leading-tight">
                       {product.name}
                     </div>
                     <div
                       className="w-full flex justify-center py-0.5"
                       dangerouslySetInnerHTML={{ __html: generateBarcodeSvg(product.barcode || '') }}
                     />
-                    <div className="font-mono text-[8px] font-black tracking-wider text-black">
+                    <div className="font-mono text-[7px] font-black tracking-tighter text-black leading-none">
                       {formatBarcodeText(product.barcode || '')}
                     </div>
-                    <div className="text-[8px] font-black text-[#2E7D32]">
-                      {product.selling_price.toFixed(2)} {settings.currency_symbol}
-                    </div>
+                    {showPrice && (
+                      <div className="text-[7.5px] font-black text-[#2E7D32] leading-tight">
+                        {product.selling_price.toFixed(2)} {settings.currency_symbol}
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
-              {quantity > 12 && (
+              {quantity > 15 && (
                 <div className="text-center text-[10px] text-gray-400 font-bold mt-2">
-                  + {quantity - 12} ملصق إضافي بنفس الحجم المنسق في الورقة المطبوعة...
+                  + {quantity - 15} ملصق إضافي بنفس الحجم المصغر (موزعة على {totalPages} صفحة A4)...
                 </div>
               )}
             </div>
           ) : (
             /* Single Roll Sticker Preview */
-            <div className="w-56 p-3 bg-white text-black rounded-xl border-2 border-dashed border-gray-300 shadow-xs flex flex-col items-center justify-center text-center space-y-1">
-              <div className="text-[10px] font-bold text-gray-600 truncate max-w-full">
-                {settings.shop_name || 'ايدينيا - حِسبة'}
-              </div>
+            <div className="w-44 p-2 bg-white text-black rounded-lg border-2 border-dashed border-gray-300 shadow-xs flex flex-col items-center justify-center text-center space-y-0.5">
+              {showShopName && (
+                <div className="text-[9px] font-bold text-gray-600 truncate max-w-full">
+                  {settings.shop_name || 'ايدينيا - حِسبة'}
+                </div>
+              )}
               <div className="text-xs font-black text-gray-900 truncate max-w-full">
                 {product.name}
               </div>
 
               <div
-                className="w-full flex justify-center py-1"
+                className="w-full flex justify-center py-0.5"
                 dangerouslySetInnerHTML={{ __html: generateBarcodeSvg(product.barcode || '') }}
               />
 
-              <div className="font-mono text-xs font-black tracking-widest text-black">
+              <div className="font-mono text-[10px] font-black tracking-wider text-black">
                 {formatBarcodeText(product.barcode || '')}
               </div>
 
-              <div className="text-xs font-black text-[#2E7D32] pt-0.5">
-                السعر: {product.selling_price.toFixed(2)} {settings.currency_symbol}
-              </div>
+              {showPrice && (
+                <div className="text-xs font-black text-[#2E7D32] pt-0.5">
+                  {product.selling_price.toFixed(2)} {settings.currency_symbol}
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -539,10 +614,10 @@ export const BarcodeStickerModal: React.FC<BarcodeStickerModalProps> = ({
         <div className="p-2.5 bg-emerald-50 dark:bg-emerald-950/30 rounded-xl border border-emerald-200 dark:border-emerald-800 text-[11px] text-emerald-800 dark:text-emerald-300 space-y-1">
           <div className="font-bold flex items-center gap-1">
             <Check className="w-3.5 h-3.5 text-emerald-600" />
-            <span>توفير أقصى للورق مع حواف ومنسقات متساوية</span>
+            <span>توفير أقصى: الورقة الـ A4 تتسع لـ 65 ملصقاً مصغراً منسقاً!</span>
           </div>
           <p className="text-[10px] text-gray-500 dark:text-gray-400">
-            سيتم طباعة {quantity} ملصق بحجم موحد ومنسق على الورقة، جاهزة للقص والمسح الفوري بواسطة قارئ الباركود أو كاميرا الموبايل!
+            تم ضبط الأبعاد الدقيقة لتلصق على أرق المنتجات، مع تقسيم تلقائي للورق عند طلب أكثر من 65 ملصقاً.
           </p>
         </div>
 

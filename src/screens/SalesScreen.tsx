@@ -76,25 +76,53 @@ export const SalesScreen: React.FC<SalesScreenProps> = ({ onShowReceipt }) => {
     return () => window.removeEventListener('idenia_db_changed', handleDbChanged);
   }, []);
 
-  // Listen for barcode scan events from external scanners, camera cashier screen, or other tabs
+  // Listen for barcode scan events from external scanners, camera cashier screen, or BroadcastChannels
   useEffect(() => {
+    const processScanData = (parsed: any) => {
+      if (parsed && parsed.barcode) {
+        if (parsed.mode === 'sale' || !parsed.mode) {
+          handleBarcodeDetected(parsed.barcode);
+        } else if (parsed.mode === 'return') {
+          handleBarcodeReturn(parsed.barcode);
+        }
+      }
+    };
+
     const handleStorage = (e: StorageEvent) => {
-      if (e.key === 'idenia_last_scanned_barcode_event' && e.newValue) {
+      if (
+        (e.key === 'idenia_last_scanned_barcode_event' || e.key === `idenia_station_scan_${stationId}`) &&
+        e.newValue
+      ) {
         try {
           const parsed = JSON.parse(e.newValue);
-          if (parsed && parsed.barcode) {
-            if (parsed.mode === 'sale') {
-              handleBarcodeDetected(parsed.barcode);
-            } else if (parsed.mode === 'return') {
-              handleBarcodeReturn(parsed.barcode);
-            }
-          }
+          processScanData(parsed);
         } catch {}
       }
     };
+
     window.addEventListener('storage', handleStorage);
-    return () => window.removeEventListener('storage', handleStorage);
-  }, [products]);
+
+    let bc: BroadcastChannel | null = null;
+    if (typeof BroadcastChannel !== 'undefined') {
+      try {
+        bc = new BroadcastChannel(`idenia_station_${stationId}`);
+        bc.onmessage = (event) => {
+          if (event && event.data) {
+            processScanData(event.data);
+          }
+        };
+      } catch {}
+    }
+
+    return () => {
+      window.removeEventListener('storage', handleStorage);
+      if (bc) {
+        try {
+          bc.close();
+        } catch {}
+      }
+    };
+  }, [products, stationId]);
 
   // Audio Beep
   const playBeep = () => {

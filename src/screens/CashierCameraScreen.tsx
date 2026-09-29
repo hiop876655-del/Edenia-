@@ -562,13 +562,14 @@ export const CashierCameraScreen: React.FC<CashierCameraScreenProps> = ({
     if (!clean) return;
 
     const now = Date.now();
-    // Debounce duplicate scans of SAME barcode within 1.5 seconds
-    if (lastScannedBarcodeRef.current === clean && now - lastScanTimestampRef.current < 1500) {
+    // Debounce duplicate scans of SAME barcode within 300ms for rapid cashier scanning ("tik tik tik")
+    if (lastScannedBarcodeRef.current === clean && now - lastScanTimestampRef.current < 300) {
       return;
     }
 
     lastScannedBarcodeRef.current = clean;
     lastScanTimestampRef.current = now;
+    const scanNonce = `${now}_${Math.random().toString(36).substring(2, 7)}`;
 
     // Check if the scanned barcode is a Station Pairing QR Code from PC screen
     try {
@@ -598,7 +599,8 @@ export const CashierCameraScreen: React.FC<CashierCameraScreenProps> = ({
       sendStationBarcodeScanInFirebase(phone, stationId, {
         barcode: clean,
         mode,
-        productName: targetProduct ? targetProduct.name : `صنف #${clean}`
+        productName: targetProduct ? targetProduct.name : `صنف #${clean}`,
+        nonce: scanNonce
       }).catch(console.warn);
     }
 
@@ -608,13 +610,14 @@ export const CashierCameraScreen: React.FC<CashierCameraScreenProps> = ({
         barcode: clean,
         stationId: stationId.toUpperCase(),
         mode,
-        timestamp: now
+        timestamp: now,
+        nonce: scanNonce
       });
       localStorage.setItem(`idenia_station_scan_${stationId.toUpperCase()}`, stationScanPayload);
       localStorage.setItem('idenia_last_scanned_barcode_event', stationScanPayload);
       if (typeof BroadcastChannel !== 'undefined') {
         const bc = new BroadcastChannel(`idenia_station_${stationId.toUpperCase()}`);
-        bc.postMessage({ barcode: clean, mode, timestamp: now });
+        bc.postMessage({ barcode: clean, mode, timestamp: now, nonce: scanNonce });
         bc.close();
       }
     } catch {}
