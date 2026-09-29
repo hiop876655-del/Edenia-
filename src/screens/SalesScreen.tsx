@@ -14,6 +14,7 @@ import {
   AlertCircle,
   FileText,
   RotateCcw,
+  RefreshCw,
   History,
   QrCode,
   Package,
@@ -239,14 +240,24 @@ export const SalesScreen: React.FC<SalesScreenProps> = ({ onShowReceipt }) => {
     const allProds = db.getProducts();
     const found = allProds.find(p => p.barcode && p.barcode.trim().toLowerCase() === clean.toLowerCase());
     if (found) {
-      // 1. Refresh products list
-      loadData();
       playBeep();
 
+      // 1. Return 1 unit back to inventory stock
+      const currentStock = Number(found.quantity) || 0;
+      const updatedProduct: Product = {
+        ...found,
+        quantity: currentStock + 1,
+        updated_at: new Date().toISOString()
+      };
+      db.saveProduct(updatedProduct);
+      loadData();
+
       // 2. If this item is currently in the active cart, decrease it by 1 or remove it
+      let wasInCart = false;
       setCart(prev => {
         const inCart = prev.find(it => it.product_id === found.id);
         if (inCart) {
+          wasInCart = true;
           if (inCart.quantity <= 1) {
             return prev.filter(it => it.product_id !== found.id);
           }
@@ -264,13 +275,69 @@ export const SalesScreen: React.FC<SalesScreenProps> = ({ onShowReceipt }) => {
         return prev;
       });
 
-      setSuccessMessage(`🔄 استرجاع: تم استرجاع صنف (${found.name}) وإعادته إلى رصيد المخزن بنجاح!`);
+      if (wasInCart) {
+        setSuccessMessage(`🔄 استرجاع: تم خصم قطعة من الفاتورة الحالية وإعادتها للمخزن: (${found.name})`);
+      } else {
+        setSuccessMessage(`🔄 استرجاع: تم إرجاع قطعة واحدة من (${found.name}) إلى رصيد المخزن مباشرة!`);
+      }
       setTimeout(() => setSuccessMessage(null), 3500);
     } else {
       setErrorMessage(`وصل طلب استرجاع لصنف غير مسجل بالباركود: ${clean}`);
       setTimeout(() => setErrorMessage(null), 3500);
     }
   };
+
+  // Handler for Recalling / Re-opening a Saved Invoice in Cashier POS
+  const handleRecallInvoiceForEdit = (saleToRecall: Sale) => {
+    if (!saleToRecall || !saleToRecall.items) return;
+
+    if (cart.length > 0) {
+      const confirmReplace = window.confirm(
+        `توجد أصناف حالية بداخل الكاشير (${cart.length} صنف).\nهل تريد استبدالها بأصناف الفاتورة رقم (#${saleToRecall.invoice_number}) للتعديل عليها؟`
+      );
+      if (!confirmReplace) return;
+    }
+
+    // 1. Restock items and reverse previous transaction in DB
+    const voidRes = db.voidInvoice(saleToRecall.id, 'all');
+    if (!voidRes.success) {
+      setErrorMessage(`تعذر استرجاع الفاتورة: ${voidRes.message}`);
+      setTimeout(() => setErrorMessage(null), 3000);
+      return;
+    }
+
+    // 2. Load items into active POS cart
+    const recalledCartItems: SaleItem[] = saleToRecall.items.map(it => ({
+      ...it,
+      id: `recalled_${Date.now()}_${Math.random().toString(36).substring(2, 5)}`
+    }));
+
+    setCart(recalledCartItems);
+    setSelectedCustomerId(saleToRecall.customer_id || '');
+    setCustomCustomerName(saleToRecall.customer_name || 'عميل نقدي');
+    setPaymentType((saleToRecall.payment_type === 'debt' || (saleToRecall.payment_type as string) === 'credit') ? 'debt' : 'cash');
+    setDiscount(saleToRecall.discount || 0);
+    setPaidAmount(saleToRecall.paid_amount || 0);
+    setNotes(saleToRecall.notes || '');
+
+    // 3. Switch to POS active tab & reload DB state
+    setActiveTab('pos');
+    loadData();
+
+    setSuccessMessage(`🔄 تم استرجاع الفاتورة (#${saleToRecall.invoice_number}) بداخل الكاشير للتعديل بنجاح، وإعادة أصنافها للمخزن مؤقتاً. يمكنك الآن إضافة/خصم أصناف ثم حفظ الفاتورة مرة أخرى!`);
+    setTimeout(() => setSuccessMessage(null), 6000);
+  };
+
+  // Listen for global recall invoice events from thermal receipt modal or other screens
+  useEffect(() => {
+    const handleGlobalRecall = (e: any) => {
+      if (e && e.detail) {
+        handleRecallInvoiceForEdit(e.detail);
+      }
+    };
+    window.addEventListener('idenia_recall_invoice', handleGlobalRecall);
+    return () => window.removeEventListener('idenia_recall_invoice', handleGlobalRecall);
+  }, [cart]);
 
   // Auto-detect barcode entered directly into search box
   useEffect(() => {
@@ -853,6 +920,15 @@ export const SalesScreen: React.FC<SalesScreenProps> = ({ onShowReceipt }) => {
                           title="عرض وطباعة الإيصال الحراري"
                         >
                           <Printer className="w-4 h-4" />
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => handleRecallInvoiceForEdit(sale)}
+                          className="p-1.5 text-amber-600 hover:text-amber-800 hover:bg-amber-50 dark:hover:bg-amber-950/40 rounded-lg cursor-pointer transition-colors"
+                          title="إعادة الفاتورة للكاشير للتعديل"
+                        >
+                          <RefreshCw className="w-4 h-4" />
                         </button>
 
                         <button

@@ -744,6 +744,15 @@ export function App() {
             db.voidInvoice(saleId, mode);
             setViewingReceiptSale(null);
           }}
+          onRecall={(saleToRecall) => {
+            setViewingReceiptSale(null);
+            setCurrentScreen('sales');
+            setTimeout(() => {
+              if (typeof window !== 'undefined') {
+                window.dispatchEvent(new CustomEvent('idenia_recall_invoice', { detail: saleToRecall }));
+              }
+            }, 50);
+          }}
         />
 
         <MobileMoreDrawer

@@ -1,5 +1,5 @@
 import React, { useRef, useState } from 'react';
-import { Printer, X, Check, Share2, Copy, RotateCcw } from 'lucide-react';
+import { Printer, X, Check, Share2, Copy, RotateCcw, RefreshCw } from 'lucide-react';
 import { Sale, AppSettings } from '../types';
 import { SmartVoidModal } from './SmartVoidModal';
 
@@ -9,6 +9,7 @@ interface ThermalReceiptModalProps {
   isOpen: boolean;
   onClose: () => void;
   onVoid?: (saleId: string, mode?: 'all' | 'items_only' | 'payment_only') => void;
+  onRecall?: (sale: Sale) => void;
 }
 
 export const ThermalReceiptModal: React.FC<ThermalReceiptModalProps> = ({
@@ -16,7 +17,8 @@ export const ThermalReceiptModal: React.FC<ThermalReceiptModalProps> = ({
   settings,
   isOpen,
   onClose,
-  onVoid
+  onVoid,
+  onRecall
 }) => {
   const receiptRef = useRef<HTMLDivElement>(null);
   const [copied, setCopied] = useState(false);
@@ -228,6 +230,21 @@ export const ThermalReceiptModal: React.FC<ThermalReceiptModalProps> = ({
                 {copied ? <Check className="w-4 h-4 text-emerald-600" /> : <Copy className="w-4 h-4" />}
                 <span>{copied ? 'تم النسخ' : 'نسخ النص'}</span>
               </button>
+
+              {onRecall && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onRecall(sale);
+                    onClose();
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900/60 hover:bg-amber-100 dark:hover:bg-amber-900/60 rounded-xl transition-colors cursor-pointer"
+                  title="إعادة الفاتورة بالكاشير للتعديل"
+                >
+                  <RefreshCw className="w-4 h-4 text-amber-600" />
+                  <span>الرجوع للكاشير للتعديل</span>
+                </button>
+              )}
 
               {onVoid && (
                 <button

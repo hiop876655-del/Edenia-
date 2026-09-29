@@ -624,26 +624,15 @@ export const CashierCameraScreen: React.FC<CashierCameraScreenProps> = ({
 
     // 2. Process according to active mode ('sale' vs 'return')
     if (mode === 'return') {
-      // --- وضع الاسترجاع: إعادة المنتج للمخزن وزيادة الكمية ---
       if (targetProduct) {
-        const currentQty = Number(targetProduct.quantity) || 0;
-        const newQty = currentQty + 1;
-        const updatedProduct: Product = {
-          ...targetProduct,
-          quantity: newQty,
-          updated_at: new Date().toISOString()
-        };
-        db.saveProduct(updatedProduct);
-        loadData();
-
         playBeep('return');
         setScanCount(prev => prev + 1);
 
         setLastScannedProduct({
-          product: updatedProduct,
+          product: targetProduct,
           time: now,
           mode: 'return',
-          message: `🔄 تم استرجاع الصنف وإعادته للمخزن (+1)! الرصيد بالمخزن الآن: ${newQty}`
+          message: `🔄 تم إرسال أمر استرجاع الصنف (${targetProduct.name}) لخصمه من الفاتورة وإعادته للمخزن!`
         });
       } else {
         playBeep('error');
