@@ -197,16 +197,68 @@ export function subscribeToMerchantStatusInFirebase(phone: string, onUpdate: (st
   }
 }
 
+// Helper to update all merchant document variations in Firestore by phone
+async function updateAllMerchantDocsInFirebase(phone: string, payload: any) {
+  const cleanPhone = phone.replace(/[^0-9]/g, '');
+  const trimmedPhone = phone.trim();
+  const withZero = cleanPhone.startsWith('0') ? cleanPhone : `0${cleanPhone}`;
+  const withoutZero = cleanPhone.startsWith('0') ? cleanPhone.slice(1) : cleanPhone;
+  const phoneVariations = Array.from(new Set([trimmedPhone, cleanPhone, withZero, withoutZero]));
+
+  const primaryDocId = `m_${cleanPhone}`;
+  await setDoc(doc(firestore, 'merchants', primaryDocId), payload, { merge: true });
+
+  try {
+    const q = query(
+      collection(firestore, 'merchants'),
+      where('phone', 'in', phoneVariations)
+    );
+    const querySnap = await getDocs(q);
+    for (const d of querySnap.docs) {
+      if (d.id !== primaryDocId) {
+        await setDoc(doc(firestore, 'merchants', d.id), payload, { merge: true });
+      }
+    }
+  } catch (err) {
+    console.warn('Update all merchant docs error:', err);
+  }
+}
+
+// Helper to delete all merchant document variations in Firestore by phone
+async function deleteAllMerchantDocsInFirebase(phone: string) {
+  const cleanPhone = phone.replace(/[^0-9]/g, '');
+  const trimmedPhone = phone.trim();
+  const withZero = cleanPhone.startsWith('0') ? cleanPhone : `0${cleanPhone}`;
+  const withoutZero = cleanPhone.startsWith('0') ? cleanPhone.slice(1) : cleanPhone;
+  const phoneVariations = Array.from(new Set([trimmedPhone, cleanPhone, withZero, withoutZero]));
+
+  const primaryDocId = `m_${cleanPhone}`;
+  try {
+    await deleteDoc(doc(firestore, 'merchants', primaryDocId));
+  } catch {}
+
+  try {
+    const q = query(
+      collection(firestore, 'merchants'),
+      where('phone', 'in', phoneVariations)
+    );
+    const querySnap = await getDocs(q);
+    for (const d of querySnap.docs) {
+      try {
+        await deleteDoc(doc(firestore, 'merchants', d.id));
+      } catch {}
+    }
+  } catch (err) {
+    console.warn('Delete all merchant docs error:', err);
+  }
+}
+
 // 3. Admin: Activate Merchant in Firebase (By Days Counter)
 export async function activateMerchantInFirebase(phone: string, days: number, notes?: string) {
   const isOnline = await checkRealInternetConnection(3000);
   if (!isOnline) {
     throw new Error('يلزم الاتصال بالإنترنت لإتمام تفعيل حساب التاجر سحابياً.');
   }
-
-  const cleanPhone = phone.replace(/[^0-9]/g, '');
-  const merchantDocId = `m_${cleanPhone}`;
-  const merchantRef = doc(firestore, 'merchants', merchantDocId);
 
   const now = Date.now();
   const expiresAt = now + (days * 86400000);
@@ -221,7 +273,7 @@ export async function activateMerchantInFirebase(phone: string, days: number, no
 
   if (notes) updateData.notes = notes;
 
-  await setDoc(merchantRef, updateData, { merge: true });
+  await updateAllMerchantDocsInFirebase(phone, updateData);
   return { success: true, expiresAt, remainingDays: days };
 }
 
@@ -233,12 +285,23 @@ export async function extendMerchantInFirebase(phone: string, extraDays: number,
   }
 
   const cleanPhone = phone.replace(/[^0-9]/g, '');
-  const merchantDocId = `m_${cleanPhone}`;
-  const merchantRef = doc(firestore, 'merchants', merchantDocId);
-
-  const snap = await getDoc(merchantRef);
+  const primaryDocId = `m_${cleanPhone}`;
+  const snap = await getDoc(doc(firestore, 'merchants', primaryDocId));
   const now = Date.now();
   let currentExpiry = snap.exists() ? (snap.data().subscriptionExpiresAt || 0) : 0;
+  if (!currentExpiry) {
+    try {
+      const q = query(
+        collection(firestore, 'merchants'),
+        where('phone', 'in', [phone.trim(), cleanPhone, `0${cleanPhone}`.replace(/^00/, '0')])
+      );
+      const querySnap = await getDocs(q);
+      if (!querySnap.empty) {
+        currentExpiry = querySnap.docs[0].data().subscriptionExpiresAt || 0;
+      }
+    } catch {}
+  }
+
   let newExpiry = currentExpiry > now ? currentExpiry + (extraDays * 86400000) : now + (extraDays * 86400000);
 
   const updateData: any = {
@@ -248,21 +311,17 @@ export async function extendMerchantInFirebase(phone: string, extraDays: number,
   };
   if (notes) updateData.notes = notes;
 
-  await setDoc(merchantRef, updateData, { merge: true });
+  await updateAllMerchantDocsInFirebase(phone, updateData);
   const remainingDays = Math.ceil((newExpiry - now) / 86400000);
   return { success: true, newExpiry, remainingDays };
 }
 
 // 5. Admin: Freeze / Suspend Merchant in Firebase
 export async function freezeMerchantInFirebase(phone: string) {
-  const cleanPhone = phone.replace(/[^0-9]/g, '');
-  const merchantDocId = `m_${cleanPhone}`;
-  const merchantRef = doc(firestore, 'merchants', merchantDocId);
-
-  await setDoc(merchantRef, {
+  await updateAllMerchantDocsInFirebase(phone, {
     subscriptionStatus: 'frozen',
     updatedAt: Date.now()
-  }, { merge: true });
+  });
 
   return { success: true };
 }
@@ -270,29 +329,35 @@ export async function freezeMerchantInFirebase(phone: string) {
 // 6. Admin: Unfreeze Merchant in Firebase
 export async function unfreezeMerchantInFirebase(phone: string) {
   const cleanPhone = phone.replace(/[^0-9]/g, '');
-  const merchantDocId = `m_${cleanPhone}`;
-  const merchantRef = doc(firestore, 'merchants', merchantDocId);
-
-  const snap = await getDoc(merchantRef);
+  const primaryDocId = `m_${cleanPhone}`;
+  const snap = await getDoc(doc(firestore, 'merchants', primaryDocId));
   const now = Date.now();
-  const expiresAt = snap.exists() ? (snap.data().subscriptionExpiresAt || 0) : 0;
+  let expiresAt = snap.exists() ? (snap.data().subscriptionExpiresAt || 0) : 0;
+  if (!expiresAt) {
+    try {
+      const q = query(
+        collection(firestore, 'merchants'),
+        where('phone', 'in', [phone.trim(), cleanPhone, `0${cleanPhone}`.replace(/^00/, '0')])
+      );
+      const querySnap = await getDocs(q);
+      if (!querySnap.empty) {
+        expiresAt = querySnap.docs[0].data().subscriptionExpiresAt || 0;
+      }
+    } catch {}
+  }
   const newStatus = expiresAt > now ? 'active' : 'expired';
 
-  await setDoc(merchantRef, {
+  await updateAllMerchantDocsInFirebase(phone, {
     subscriptionStatus: newStatus,
     updatedAt: now
-  }, { merge: true });
+  });
 
   return { success: true, status: newStatus };
 }
 
 // 7. Admin: Delete Merchant from Firebase
 export async function deleteMerchantInFirebase(phone: string) {
-  const cleanPhone = phone.replace(/[^0-9]/g, '');
-  const merchantDocId = `m_${cleanPhone}`;
-  const merchantRef = doc(firestore, 'merchants', merchantDocId);
-
-  await deleteDoc(merchantRef);
+  await deleteAllMerchantDocsInFirebase(phone);
   return { success: true };
 }
 
@@ -303,14 +368,10 @@ export async function updateMerchantPasswordInFirebase(phone: string, newPasswor
     throw new Error('يلزم وجود اتصال بالإنترنت لتحديث كلمة المرور سحابياً.');
   }
 
-  const cleanPhone = phone.replace(/[^0-9]/g, '');
-  const merchantDocId = `m_${cleanPhone}`;
-  const merchantRef = doc(firestore, 'merchants', merchantDocId);
-
-  await setDoc(merchantRef, {
+  await updateAllMerchantDocsInFirebase(phone, {
     password: newPassword,
     passwordUpdatedAt: Date.now()
-  }, { merge: true });
+  });
 
   return { success: true };
 }
@@ -318,11 +379,6 @@ export async function updateMerchantPasswordInFirebase(phone: string, newPasswor
 // 8.01. Admin: Update Merchant Camera Feature in Firebase
 export async function updateMerchantCameraFeatureInFirebase(phone: string, enabled: boolean, expiresAt: number) {
   try {
-    const cleanPhone = phone.replace(/[^0-9]/g, '');
-    const trimmedPhone = phone.trim();
-    const merchantDocId = `m_${cleanPhone}`;
-    const merchantRef = doc(firestore, 'merchants', merchantDocId);
-
     const payload = {
       cameraFeatureEnabled: enabled,
       cameraFeatureExpiresAt: expiresAt,
@@ -330,24 +386,7 @@ export async function updateMerchantCameraFeatureInFirebase(phone: string, enabl
       updatedAt: Date.now()
     };
 
-    await setDoc(merchantRef, payload, { merge: true });
-
-    // Also update any queried docs with different ID if applicable
-    try {
-      const q = query(
-        collection(firestore, 'merchants'),
-        where('phone', 'in', [trimmedPhone, cleanPhone, `0${cleanPhone}`.replace(/^00/, '0')])
-      );
-      const querySnap = await getDocs(q);
-      querySnap.forEach(async (d) => {
-        if (d.id !== merchantDocId) {
-          await setDoc(doc(firestore, 'merchants', d.id), payload, { merge: true });
-        }
-      });
-    } catch {
-      // non-blocking
-    }
-
+    await updateAllMerchantDocsInFirebase(phone, payload);
     return { success: true };
   } catch (err) {
     console.warn('Firebase camera feature update error:', err);

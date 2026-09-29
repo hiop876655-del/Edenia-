@@ -242,15 +242,21 @@ export const ProductsScreen: React.FC<ProductsScreenProps> = ({
                 <label className="text-xs font-bold text-gray-700 dark:text-gray-300">
                   وحدة القياس / البيع
                 </label>
-                <select
-                  value={unit}
-                  onChange={e => setUnit(e.target.value as ProductUnit)}
-                  className="w-full px-3.5 py-2 text-xs rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-zinc-900 text-gray-900 dark:text-white focus:outline-hidden"
-                >
-                  {PRODUCT_UNITS.map(u => (
-                    <option key={u} value={u}>{u}</option>
-                  ))}
-                </select>
+                <div className="relative">
+                  <input
+                    type="text"
+                    list="product-units-list"
+                    value={unit}
+                    onChange={e => setUnit(e.target.value as ProductUnit)}
+                    placeholder="اختر أو اكتب وحدة القياس (مثال: قطعة، كيلو، شريط)..."
+                    className="w-full px-3.5 py-2 text-xs rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-zinc-900 text-gray-900 dark:text-white focus:outline-hidden font-medium"
+                  />
+                  <datalist id="product-units-list">
+                    {PRODUCT_UNITS.map(u => (
+                      <option key={u} value={u} />
+                    ))}
+                  </datalist>
+                </div>
               </div>
             </div>
 

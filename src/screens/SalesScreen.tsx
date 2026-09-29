@@ -47,22 +47,27 @@ export const SalesScreen: React.FC<SalesScreenProps> = ({ onShowReceipt }) => {
     localStorage.setItem('idenia_pos_station_id', newStationId);
   };
 
-  // Active Cart State
-  const [cart, setCart] = useState<SaleItem[]>([]);
-  const [selectedCustomerId, setSelectedCustomerId] = useState<string>('');
-  const [customCustomerName, setCustomCustomerName] = useState<string>('عميل نقدي');
-  const [paymentType, setPaymentType] = useState<'cash' | 'debt'>('cash');
-  const [discount, setDiscount] = useState<number>(0);
-  const [paidAmount, setPaidAmount] = useState<number>(0);
-  const [notes, setNotes] = useState<string>('');
-  const [editingSale, setEditingSale] = useState<Sale | null>(() => {
+  // Read restored editing sale from localStorage
+  const initialEditingSale: Sale | null = (() => {
     try {
       const saved = localStorage.getItem('idenia_pos_active_editing_sale');
       return saved ? JSON.parse(saved) : null;
     } catch {
       return null;
     }
-  });
+  })();
+
+  // Active Cart State
+  const [cart, setCart] = useState<SaleItem[]>(initialEditingSale?.items || []);
+  const [selectedCustomerId, setSelectedCustomerId] = useState<string>(initialEditingSale?.customer_id || '');
+  const [customCustomerName, setCustomCustomerName] = useState<string>(initialEditingSale?.customer_name || 'عميل نقدي');
+  const [paymentType, setPaymentType] = useState<'cash' | 'debt'>(
+    (initialEditingSale?.payment_type === 'debt' || (initialEditingSale?.payment_type as string) === 'credit') ? 'debt' : 'cash'
+  );
+  const [discount, setDiscount] = useState<number>(initialEditingSale?.discount || 0);
+  const [paidAmount, setPaidAmount] = useState<number>(initialEditingSale?.paid_amount || 0);
+  const [notes, setNotes] = useState<string>(initialEditingSale?.notes || '');
+  const [editingSale, setEditingSale] = useState<Sale | null>(initialEditingSale);
 
   // Search & Barcode
   const [productSearch, setProductSearch] = useState('');
@@ -341,6 +346,25 @@ export const SalesScreen: React.FC<SalesScreenProps> = ({ onShowReceipt }) => {
     setSuccessMessage('تم إلغاء تعديل الفاتورة وتصفير الكاشير. الفاتورة الأصلية محفوظة بسجل الفواتير كما هي.');
     setTimeout(() => setSuccessMessage(null), 3500);
   };
+
+  // Synchronize active editing sale state to localStorage whenever cart or invoice settings change
+  useEffect(() => {
+    if (editingSale) {
+      const updatedEditingSale: Sale = {
+        ...editingSale,
+        items: cart,
+        customer_id: selectedCustomerId,
+        customer_name: customCustomerName,
+        payment_type: paymentType,
+        discount,
+        paid_amount: paidAmount,
+        notes
+      };
+      try {
+        localStorage.setItem('idenia_pos_active_editing_sale', JSON.stringify(updatedEditingSale));
+      } catch {}
+    }
+  }, [editingSale, cart, selectedCustomerId, customCustomerName, paymentType, discount, paidAmount, notes]);
 
   // Listen for global recall invoice events from thermal receipt modal or other screens
   useEffect(() => {
